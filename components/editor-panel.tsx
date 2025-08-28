@@ -1,131 +1,62 @@
+"use client";
+import { useEffect, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+import { useDebouncedCallback } from "@/lib/useDebouncedSave";
+import type { Id } from "../convex/_generated/dataModel";
 
-const exampleMarkdown = `# Heading 1
+type DocumentData = {
+  _id: Id<"documents">;
+  title: string;
+  markdownContent: string;
+  cssContent?: string | null;
+};
 
-## Heading 2
+export default function EditorPanel({ doc }: { doc?: DocumentData | null }) {
+  const [value, setValue] = useState<string>(doc?.markdownContent ?? "");
+  const update = useMutation(api.documents.updateDocument);
 
-### Heading 3
+  // update local state when switching documents or markdown content changes
+  useEffect(() => {
+    setValue(doc?.markdownContent ?? "");
+  }, [doc?.markdownContent]);
 
-#### Heading 4
+  const debouncedSave = useDebouncedCallback(async (newValue: string) => {
+    if (!doc?._id) return;
+    try {
+      await update({
+        documentId: doc._id,
+        markdownContent: newValue,
+      });
+    } catch (_e) {
+      // swallow; UI could show a toast in the future
+      // console.error("Failed to save document", _e);
+    }
+  }, 800);
 
-##### Heading 5
-
-###### Heading 6
-
-## Text Formatting
-
-**Bold text** and __bold text__
-
-*Italic text* and _italic text_
-
-***Bold and italic*** and ___bold and italic___
-
-~~Strikethrough text~~
-
-## Lists
-
-### Unordered List
-
-- Item 1
-- Item 2
-  - Nested item 2.1
-  - Nested item 2.2
-- Item 3
-
-### Ordered List
-
-1. First item
-2. Second item
-   1. Nested item 2.1
-   2. Nested item 2.2
-3. Third item
-
-## Links and Images
-
-[Link to Google](https://google.com)
-
-[Link with title](https://example.com "Example Website")
-
-![Alt text for image](https://via.placeholder.com/300x200)
-
-## Code
-
-Inline \`code\` with backticks.
-
-\`\`\`javascript
-// Code block
-function greet(name) {
-  console.log(\`Hello, \${name}!\`);
-}
-
-greet("World");
-\`\`\`
-
-\`\`\`python
-# Python code block
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
-
-print(fibonacci(10))
-\`\`\`
-
-## Blockquotes
-
-> This is a blockquote.
-> It can span multiple lines.
->
-> > Nested blockquote
-
-## Tables
-
-| Column 1 | Column 2 | Column 3 |
-|----------|----------|----------|
-| Row 1    | Data 1   | Info 1   |
-| Row 2    | Data 2   | Info 2   |
-| Row 3    | Data 3   | Info 3   |
-
-## Horizontal Rule
-
----
-
-## Task Lists
-
-- [x] Completed task
-- [ ] Incomplete task
-- [ ] Another task
-
-## Additional Elements
-
-### Line Break
-Two spaces at the end of line
-creates a line break.
-
-### Escape Characters
-
-\\* Not italic \\*
-
-\\# Not a header
-
-### HTML Elements
-
-<mark>Highlighted text</mark>
-
----
-
-*This markdown demonstrates the most common syntax elements.*`;
-
-export default function EditorPanel() {
   return (
-    <CodeMirror
-      value={exampleMarkdown}
-      extensions={[
-        markdown({ base: markdownLanguage, codeLanguages: languages }),
-      ]}
-      theme={"dark"}
-    />
+    <div className="h-full">
+      <div className="p-4 border-b">
+        <h2 className="text-lg font-semibold">{doc?.title ?? "Untitled"}</h2>
+      </div>
+
+      <div className="p-4 h-[calc(100%-4rem)]">
+        <CodeMirror
+          value={value}
+          extensions={[
+            markdown({ base: markdownLanguage, codeLanguages: languages }),
+          ]}
+          theme={"dark"}
+          onChange={(val) => {
+            setValue(val);
+            debouncedSave(val);
+          }}
+          height="100%"
+        />
+      </div>
+    </div>
   );
 }

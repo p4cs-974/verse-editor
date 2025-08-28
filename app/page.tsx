@@ -2,8 +2,6 @@
 
 import { Authenticated, Unauthenticated } from "convex/react";
 import { SignInButton } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { ArrowUpRight } from "lucide-react";
@@ -33,6 +31,7 @@ export default function Home() {
           </p>
           <SignInButton>
             <button
+              type="button"
               aria-label="Sign in to Verse"
               className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-400 to-teal-400 dark:from-emerald-600 dark:to-teal-600 text-white font-semibold px-6 py-2 rounded-full shadow-lg hover:brightness-105 focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-500 transform transition hover:-translate-y-0.5"
             >
