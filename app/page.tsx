@@ -13,9 +13,11 @@ export default function Home() {
   return (
     <>
       <Authenticated>
+        {/* <AuthDebug> */}
         <Header />
         <EditorLayout />
         <Footer />
+        {/* </AuthDebug> */}
       </Authenticated>
       <Unauthenticated>
         <div className="w-full p-6 text-center whitespace-nowrap">
