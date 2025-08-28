@@ -1,3 +1,44 @@
-// This component represents a button in the toolbar, which can trigger different actions and/or display popover menus (`./popover.tsx`).
-// Buttons must have an icon (preferably from lucide-react) and a text label. the positioning of the elementis is: icon on top, label on the bottom.
-// toolbar buttons should have mint colors, and adapt to light/dark mode.
+"use client";
+
+import React from "react";
+import { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface ToolbarButtonProps {
+  icon: LucideIcon;
+  label: string;
+  onClick?: () => void;
+  isActive?: boolean;
+  ariaLabel?: string;
+  ariaPressed?: boolean;
+  className?: string;
+}
+
+export default function ToolbarButton({
+  icon: Icon,
+  label,
+  onClick,
+  isActive = false,
+  ariaLabel,
+  ariaPressed,
+  className,
+}: ToolbarButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel || label}
+      aria-pressed={ariaPressed}
+      className={cn(
+        "inline-flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-md text-xs font-medium transition-colors",
+        "bg-emerald-100/0 hover:bg-emerald-100/10 focus:outline-none focus:ring-2 focus:ring-emerald-300",
+        "dark:hover:bg-emerald-900/10 dark:focus:ring-emerald-600",
+        isActive && "bg-emerald-100/20 dark:bg-emerald-900/20",
+        className
+      )}
+    >
+      <Icon className="w-4 h-4" />
+      <span className="text-xs">{label}</span>
+    </button>
+  );
+}

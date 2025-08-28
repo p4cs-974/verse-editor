@@ -1,6 +1,7 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Files } from "lucide-react";
+import ToolbarButton from "./ui/toolbar-button";
 
 export default function Toolbar({
   sidebarOpen,
@@ -11,17 +12,14 @@ export default function Toolbar({
 }) {
   return (
     <div className="h-14 border-b bg-background/95 flex items-center px-3">
-      <button
-        type="button"
-        aria-pressed={sidebarOpen}
-        aria-label="Toggle documents sidebar"
+      <ToolbarButton
+        icon={Files}
+        label="Documents"
         onClick={onToggle}
-        className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium
-          bg-emerald-100/0 hover:bg-emerald-100/10 focus:outline-none focus:ring-2 focus:ring-emerald-300`}
-      >
-        <Menu className="w-5 h-5" />
-        <span>Documents</span>
-      </button>
+        isActive={sidebarOpen}
+        ariaLabel="Toggle documents sidebar"
+        ariaPressed={sidebarOpen}
+      />
     </div>
   );
 }

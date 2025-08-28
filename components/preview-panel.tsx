@@ -3,7 +3,7 @@
 
 import { marked } from "marked";
 import createDOMPurify, { type DOMPurify } from "dompurify";
-import { useMemo } from "react";
+import { useMemo, useId } from "react";
 
 /**
  * Preview renderer for editor documents using marked + DOMPurify.
@@ -16,13 +16,18 @@ type DocumentData = {
   cssContent?: string;
 };
 
+interface PreviewPanelProps {
+  doc?: DocumentData | null;
+  content: string;
+}
+
 // Configure marked
 marked.setOptions({
   gfm: true,
   breaks: true,
 });
 
-export default function PreviewPanel({ doc }: { doc?: DocumentData | null }) {
+export default function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const purifier = useMemo<DOMPurify>(() => {
     const p = createDOMPurify(window);
     // Harden links and images after sanitization
@@ -54,7 +59,7 @@ export default function PreviewPanel({ doc }: { doc?: DocumentData | null }) {
     return p;
   }, []);
 
-  const raw = doc?.markdownContent ?? "";
+  const raw = content || "";
   const generated = raw
     ? (marked.parse(raw) as string)
     : "<p>No document selected.</p>";
@@ -70,7 +75,7 @@ export default function PreviewPanel({ doc }: { doc?: DocumentData | null }) {
       <style>{css}</style>
 
       <div
-        className="prose max-w-none"
+        className="verse-preview-content prose max-w-none"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>

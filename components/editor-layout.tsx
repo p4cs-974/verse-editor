@@ -5,6 +5,8 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { useDebouncedCallback } from "@/lib/useDebouncedSave";
+import { DEFAULT_DOCUMENT_CSS } from "@/lib/default-document-styles";
 import Toolbar from "./toolbar";
 import DocumentsSidebar from "./documents-sidebar";
 import EditorPanel from "./editor-panel";
@@ -22,6 +24,9 @@ import PreviewPanel from "./preview-panel";
 export default function EditorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"documents"> | null>(null);
+  const [localContent, setLocalContent] = useState<string>("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedContent, setLastSavedContent] = useState<string>("");
 
   // load the selected document (returns null while not selected)
   // When no document is selected pass the "skip" sentinel so the hook doesn't run.
@@ -30,16 +35,99 @@ export default function EditorLayout() {
     selectedId ? { documentId: selectedId } : "skip"
   );
 
+  // Track if we're in the middle of a document switch to avoid conflicts
+  const documentSwitchingRef = useRef<boolean>(false);
+
+  // Sync database content to local state - only when document changes and no unsaved changes
+  useEffect(() => {
+    const incomingContent = selectedDoc?.markdownContent ?? "";
+
+    // Skip if no document
+    if (!selectedDoc) {
+      return;
+    }
+
+    console.log("🔄 Document content sync triggered:", {
+      documentId: selectedDoc._id,
+      incomingContent: incomingContent.slice(0, 50) + "...",
+      currentLocalContent: localContent.slice(0, 50) + "...",
+      lastSavedContent: lastSavedContent.slice(0, 50) + "...",
+      hasUnsavedChanges,
+      documentSwitching: documentSwitchingRef.current,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Only sync from database if:
+    // 1. We're switching documents, OR
+    // 2. No unsaved changes AND (first load OR content matches last saved)
+    const shouldSync =
+      documentSwitchingRef.current ||
+      (!hasUnsavedChanges &&
+        (lastSavedContent === "" || incomingContent === lastSavedContent));
+
+    if (shouldSync) {
+      console.log("✅ Syncing database content to local editor");
+      setLocalContent(incomingContent);
+      setLastSavedContent(incomingContent);
+      setHasUnsavedChanges(false);
+      documentSwitchingRef.current = false;
+    } else if (hasUnsavedChanges) {
+      console.warn(
+        "⚠️ CONFLICT: Preserving local changes over database content"
+      );
+    }
+  }, [selectedDoc?.markdownContent, selectedDoc?._id]);
+
   // list user's documents to auto-select or create a new one if needed
   const docs = useQuery(api.documents.listDocumentsForUser, {}) as Array<{
     _id: Id<"documents">;
     title: string;
   }> | null;
   const createDocument = useMutation(api.documents.createDocument);
+  const updateDocument = useMutation(api.documents.updateDocument);
   const { isSignedIn } = useAuth();
 
   // prevent duplicate auto-creation
   const creatingRef = useRef(false);
+
+  // Debounced save function
+  const debouncedSave = useDebouncedCallback(async (newValue: string) => {
+    if (!selectedId) return;
+    console.log("💾 Debounced save triggered:", {
+      documentId: selectedId,
+      contentPreview: newValue.slice(0, 50) + "...",
+      timestamp: new Date().toISOString(),
+    });
+    try {
+      await updateDocument({
+        documentId: selectedId,
+        markdownContent: newValue,
+      });
+      console.log("✅ Save completed successfully");
+      // Update tracking after successful save
+      setLastSavedContent(newValue);
+      setHasUnsavedChanges(false);
+    } catch (_e) {
+      console.error("❌ Save failed:", _e);
+      // Keep unsaved changes flag on save failure
+    }
+  }, 800);
+
+  // Handle content changes
+  const handleContentChange = (newValue: string) => {
+    console.log("✏️ User typing:", {
+      contentPreview: newValue.slice(0, 50) + "...",
+      timestamp: new Date().toISOString(),
+    });
+    setLocalContent(newValue);
+
+    // Mark as having unsaved changes if content differs from last saved
+    if (newValue !== lastSavedContent) {
+      setHasUnsavedChanges(true);
+    }
+
+    debouncedSave(newValue);
+  };
 
   useEffect(() => {
     // If there's already a selected document, do nothing.
@@ -51,6 +139,9 @@ export default function EditorLayout() {
     if (docs.length > 0) {
       setSelectedId(docs[0]._id);
       setSidebarOpen(false);
+      // Reset tracking state when auto-selecting first document
+      setHasUnsavedChanges(false);
+      setLastSavedContent("");
       return;
     }
 
@@ -62,10 +153,13 @@ export default function EditorLayout() {
           const id = await createDocument({
             title: "Untitled",
             markdownContent: "# Untitled\n\n",
-            cssContent: "",
+            cssContent: DEFAULT_DOCUMENT_CSS,
           });
           if (id) {
             setSelectedId(id as Id<"documents">);
+            // Reset tracking state for new document
+            setHasUnsavedChanges(false);
+            setLastSavedContent("# Untitled\n\n");
           }
         } catch (err) {
           console.error("Auto-create document failed", err);
@@ -87,8 +181,12 @@ export default function EditorLayout() {
           <DocumentsSidebar
             selectedId={selectedId}
             onSelect={(id) => {
+              documentSwitchingRef.current = true;
               setSelectedId(id);
               setSidebarOpen(false);
+              // Reset tracking state when switching documents
+              setHasUnsavedChanges(false);
+              setLastSavedContent("");
             }}
             onClose={() => setSidebarOpen(false)}
           />
@@ -97,11 +195,15 @@ export default function EditorLayout() {
         {/* Editor and Preview split */}
         <div className="flex-1 flex">
           <div className="w-1/2 border-r">
-            <EditorPanel doc={selectedDoc} />
+            <EditorPanel
+              doc={selectedDoc}
+              content={localContent}
+              onChange={handleContentChange}
+            />
           </div>
 
           <div className="w-1/2">
-            <PreviewPanel doc={selectedDoc} />
+            <PreviewPanel doc={selectedDoc} content={localContent} />
           </div>
         </div>
       </div>

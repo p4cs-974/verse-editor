@@ -1,11 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { languages } from "@codemirror/language-data";
-import { useMutation } from "convex/react";
-import { api } from "../convex/_generated/api";
-import { useDebouncedCallback } from "@/lib/useDebouncedSave";
+// import { languages } from "@codemirror/language-data";
 import type { Id } from "../convex/_generated/dataModel";
 
 type DocumentData = {
@@ -15,28 +11,17 @@ type DocumentData = {
   cssContent?: string | null;
 };
 
-export default function EditorPanel({ doc }: { doc?: DocumentData | null }) {
-  const [value, setValue] = useState<string>(doc?.markdownContent ?? "");
-  const update = useMutation(api.documents.updateDocument);
+interface EditorPanelProps {
+  doc?: DocumentData | null;
+  content: string;
+  onChange: (newValue: string) => void;
+}
 
-  // update local state when switching documents or markdown content changes
-  useEffect(() => {
-    setValue(doc?.markdownContent ?? "");
-  }, [doc?.markdownContent]);
-
-  const debouncedSave = useDebouncedCallback(async (newValue: string) => {
-    if (!doc?._id) return;
-    try {
-      await update({
-        documentId: doc._id,
-        markdownContent: newValue,
-      });
-    } catch (_e) {
-      // swallow; UI could show a toast in the future
-      // console.error("Failed to save document", _e);
-    }
-  }, 800);
-
+export default function EditorPanel({
+  doc,
+  content,
+  onChange,
+}: EditorPanelProps) {
   return (
     <div className="h-full">
       <div className="p-4 border-b">
@@ -45,15 +30,10 @@ export default function EditorPanel({ doc }: { doc?: DocumentData | null }) {
 
       <div className="p-4 h-[calc(100%-4rem)]">
         <CodeMirror
-          value={value}
-          extensions={[
-            markdown({ base: markdownLanguage, codeLanguages: languages }),
-          ]}
+          value={content}
+          extensions={[markdown({ base: markdownLanguage })]}
           theme={"dark"}
-          onChange={(val) => {
-            setValue(val);
-            debouncedSave(val);
-          }}
+          onChange={onChange}
           height="100%"
         />
       </div>

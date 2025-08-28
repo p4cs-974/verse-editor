@@ -5,6 +5,8 @@ import { useMutation, useQuery } from "convex/react";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { DEFAULT_DOCUMENT_CSS } from "@/lib/default-document-styles";
+import { Button } from "./ui/button";
 
 export default function DocumentsSidebar({
   selectedId,
@@ -46,7 +48,7 @@ export default function DocumentsSidebar({
       const id = await create({
         title,
         markdownContent: `# ${title}\n\n`,
-        cssContent: "",
+        cssContent: DEFAULT_DOCUMENT_CSS,
       });
       setCreatingTitle("");
       // select the newly created document
@@ -94,13 +96,14 @@ export default function DocumentsSidebar({
     <aside className="w-64 border-r bg-surface/80 p-3 flex flex-col">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold">Documents</h3>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           aria-label="Close documents"
           onClick={() => onClose?.()}
-          className="text-sm px-2 py-1 rounded hover:bg-muted"
         >
           Close
-        </button>
+        </Button>
       </div>
 
       <div className="mb-3">
@@ -111,20 +114,16 @@ export default function DocumentsSidebar({
           className="w-full px-2 py-1 rounded border bg-background/50"
         />
         <div className="mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={handleCreate}
-            className="px-3 py-1 rounded bg-emerald-500 text-white text-sm"
-          >
+          <Button size="sm" onClick={handleCreate}>
             Create
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setCreatingTitle("")}
-            className="px-3 py-1 rounded border text-sm"
           >
             Reset
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -133,77 +132,60 @@ export default function DocumentsSidebar({
         {docs && docs.length === 0 && (
           <p className="text-sm text-muted-foreground">No documents yet.</p>
         )}
-        <ul className="space-y-1">
+        <ul className="space-y-2">
           {docs?.map((d: { _id: Id<"documents">; title: string }) => (
-            <li key={d._id}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center justify-between gap-2 w-full">
-                  <div className="flex-1">
-                    {editingId === d._id ? (
-                      <input
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") saveEditing();
-                          if (e.key === "Escape") cancelEditing();
-                        }}
-                        autoFocus
-                        className="w-full px-2 py-1 rounded border bg-background/50 text-sm"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className={`w-full flex items-center justify-between gap-2 px-2 py-1 rounded cursor-pointer text-left ${
-                          selectedId === d._id
-                            ? "bg-emerald-100/30"
-                            : "hover:bg-muted"
-                        }`}
-                        onClick={() => onSelect(d._id)}
-                      >
-                        <div className="truncate text-sm">{d.title}</div>
-                      </button>
-                    )}
+            <li key={d._id} className="space-y-2">
+              {editingId === d._id ? (
+                <>
+                  <input
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveEditing();
+                      if (e.key === "Escape") cancelEditing();
+                    }}
+                    autoFocus
+                    className="w-full px-2 py-1 rounded border bg-background/50 text-sm"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" onClick={saveEditing}>
+                      Save
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={cancelEditing}>
+                      Cancel
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {editingId === d._id ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={saveEditing}
-                          className="text-xs px-2 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelEditing}
-                          className="text-xs px-2 py-1 rounded border"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => startEditing(d._id, d.title)}
-                          className="text-xs px-2 py-1 rounded border hover:bg-muted"
-                        >
-                          Rename
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Delete ${d.title}`}
-                          onClick={() => handleDelete(d._id)}
-                          className="text-xs text-red-600 px-2 py-1 rounded hover:bg-red-50"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant={selectedId === d._id ? "secondary" : "ghost"}
+                    className="w-full justify-start h-auto p-2 text-left font-normal min-h-[2.5rem] overflow-hidden"
+                    onClick={() => onSelect(d._id)}
+                  >
+                    <span className="text-sm leading-tight w-full block break-words whitespace-normal">
+                      {d.title}
+                    </span>
+                  </Button>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startEditing(d._id, d.title)}
+                    >
+                      Rename
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      aria-label={`Delete ${d.title}`}
+                      onClick={() => handleDelete(d._id)}
+                    >
+                      Delete
+                    </Button>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </li>
           ))}
         </ul>
