@@ -85,8 +85,8 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
     const existingImgs = Array.from(container.querySelectorAll("img"));
     const imgMap = new Map<string, HTMLImageElement>();
     for (const img of existingImgs) {
-      const s = img.getAttribute("src") ?? "";
-      if (s) imgMap.set(s, img);
+      const imageSrc = img.getAttribute("src") ?? "";
+      if (imageSrc) imgMap.set(imageSrc, img);
     }
 
     // Replace the container content with the new sanitized HTML.
