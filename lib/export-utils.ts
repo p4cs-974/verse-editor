@@ -1,6 +1,7 @@
 // lib/export-utils.ts
 import { marked } from "marked";
 import createDOMPurify from "dompurify";
+import html2canvasPro from "html2canvas-pro";
 
 const DOMPurify = (
   typeof window !== "undefined"
@@ -751,7 +752,393 @@ function mmToPx(mm: number) {
   return (mm * dpi) / 25.4;
 }
 
-export async function exportToPdf(}
+export async function exportToPdf(
+  html: string,
+  opts: {
+    pagination: boolean;
+    pageFormat: "4:3" | "A4";
+    fileName?: string;
+  }
+): Promise<void> {
+  // High-level steps:
+  // 1. Inline external assets (images/fonts) so PDF is self-contained.
+  // 2. Sanitize/convert modern color functions that break renderers.
+  // 3. Split into pages if pagination requested.
+  // 4. For each page, render to canvas via html2canvas and add to PDF via jsPDF.
+  // 5. Emit progress events and support abort via currentAbort.
+  currentAbort = currentAbort || new AbortController();
+  const signal = currentAbort.signal;
+  try {
+    emitProgress({ stage: "start", message: "Starting PDF export" });
+
+    // 1) Inline assets
+    emitProgress({ stage: "inlining", message: "Inlining external assets" });
+    if (signal.aborted) throw new Error("Export aborted");
+    let inlined = await inlineExternalAssets(html);
+
+    if (signal.aborted) throw new Error("Export aborted");
+
+    // 2) Sanitize modern color functions in style blocks / inline styles
+    emitProgress({
+      stage: "sanitizing",
+      message: "Sanitizing color functions and styles",
+    });
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(inlined, "text/html");
+      // Run the document fixer which modifies style tags / inline styles
+      const fixed = scanAndFixLabColorsInDoc(doc);
+      if (fixed) {
+        inlined = doc.documentElement.outerHTML;
+      } else {
+        // Still run a last-pass aggressive sanitizer on the raw HTML string
+        inlined = sanitizeCssFunctions(inlined);
+        inlined = aggressiveSanitizeColorFunctions(inlined);
+      }
+    } catch (e) {
+      // Continue even if sanitizer fails; we'll try aggressive fallback later
+      console.warn("export-utils: color sanitization failed", e);
+      inlined = aggressiveSanitizeColorFunctions(inlined);
+    }
+
+    if (signal.aborted) throw new Error("Export aborted");
+
+    // 3) Pagination - split into logical pages
+    emitProgress({
+      stage: "paginate",
+      message: "Splitting content into pages",
+    });
+    const pages = splitHtmlByPagination(inlined, undefined, opts.pagination);
+
+    // Precompute page dimensions in mm
+    const pageWidthMm = opts.pageFormat === "A4" ? 210 : 210; // use 210mm width
+    const pageHeightMm = opts.pageFormat === "A4" ? 297 : 210 * (3 / 4); // A4 or 4:3 (width x 3/4)
+
+    // Load rendering libraries dynamically so bundlers can tree-shake them and tests can mock
+    emitProgress({
+      stage: "load-libs",
+      message: "Loading rendering libraries",
+    });
+    if (signal.aborted) throw new Error("Export aborted");
+    // Prefer the statically imported `html2canvas-pro` (faster startup). If for any reason it is not
+    // present at runtime, fall back to dynamic import of the OSS `html2canvas`.
+    let html2canvasLib: any;
+    try {
+      if (typeof html2canvasPro !== "undefined" && html2canvasPro) {
+        // html2canvas-pro may export the function as default or directly.
+        html2canvasLib =
+          (html2canvasPro as any).default || (html2canvasPro as any);
+        emitProgress({
+          stage: "lib",
+          message: "Using html2canvas-pro (static import)",
+        });
+      } else {
+        html2canvasLib = (await import("html2canvas")).default as any;
+        emitProgress({
+          stage: "lib",
+          message: "Using html2canvas (dynamic import)",
+        });
+      }
+    } catch (e) {
+      // Last-resort fallback: try dynamic import of html2canvas
+      try {
+        html2canvasLib = (await import("html2canvas")).default as any;
+        emitProgress({
+          stage: "lib",
+          message: "Falling back to html2canvas (dynamic import)",
+        });
+      } catch {
+        throw new Error("html2canvas-pro/html2canvas not available");
+      }
+    }
+    const { jsPDF } = await import("jspdf");
+    if (!html2canvasLib || !jsPDF) {
+      throw new Error("Required PDF rendering libraries not available");
+    }
+
+    // Prepare PDF
+    const fileName =
+      sanitizeFilename(opts.fileName) ||
+      `preview-export-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
+
+    // Create a PDF instance. We'll use mm units to make sizing easier.
+    const pdf = new jsPDF({
+      unit: "mm",
+      format:
+        opts.pageFormat === "A4"
+          ? "a4"
+          : [
+              Math.round(pageWidthMm * 10) / 10,
+              Math.round(pageHeightMm * 10) / 10,
+            ],
+    }) as any;
+
+    // Render each page in sequence
+    for (let i = 0; i < pages.length; i++) {
+      if (signal.aborted) throw new Error("Export aborted");
+      emitProgress({
+        stage: "render",
+        current: i + 1,
+        total: pages.length,
+        message: `Rendering page ${i + 1} of ${pages.length}`,
+      });
+
+      // Create an offscreen iframe to render the page HTML in an isolated document
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.left = "-9999px";
+      iframe.style.top = "-9999px";
+      iframe.style.width = `${Math.round(mmToPx(pageWidthMm))}px`;
+      iframe.style.height = `${Math.round(mmToPx(pageHeightMm))}px`;
+      // Allow scripts so the iframe can run font-loading / CSSOM related tasks.
+      // This is reasonably safe because exported HTML is produced by
+      // `serializePreviewToHTML()` which removes <script> tags and event attributes.
+      iframe.setAttribute("sandbox", "allow-same-origin allow-scripts");
+      document.body.appendChild(iframe);
+
+      try {
+        const idoc = iframe.contentDocument;
+        if (!idoc)
+          throw new Error("Failed to create iframe document for rendering");
+        idoc.open();
+        idoc.write(pages[i]);
+        idoc.close();
+
+        // Wait for fonts/images to load with a bounded timeout so we don't hang.
+        {
+          const timeoutMs = 5000;
+          const fontsReadyPromise =
+            (idoc as any).fonts && (idoc as any).fonts.ready
+              ? (idoc as any).fonts.ready
+              : Promise.resolve();
+          const imgs = Array.from(idoc.images || []) as HTMLImageElement[];
+          const imgsReady = new Promise<void>((resolve) => {
+            if (!imgs.length) {
+              resolve();
+              return;
+            }
+            let remaining = imgs.length;
+            const markDone = () => {
+              remaining--;
+              if (remaining <= 0) resolve();
+            };
+            imgs.forEach((im) => {
+              if (im.complete && im.naturalWidth !== 0) {
+                markDone();
+              } else {
+                const onload = () => {
+                  cleanup();
+                  markDone();
+                };
+                const onerror = () => {
+                  cleanup();
+                  markDone();
+                };
+                const cleanup = () => {
+                  im.removeEventListener("load", onload);
+                  im.removeEventListener("error", onerror);
+                };
+                im.addEventListener("load", onload);
+                im.addEventListener("error", onerror);
+              }
+            });
+            // safety timeout: resolve anyway after timeoutMs
+            setTimeout(() => resolve(), timeoutMs);
+          });
+          // Wait for fonts and images (but bounded by the imgsReady timeout above).
+          await Promise.all([fontsReadyPromise.catch(() => {}), imgsReady]);
+          // small delay to allow the layout to settle
+          await new Promise((r) => setTimeout(r, 50));
+        }
+
+        if (signal.aborted) throw new Error("Export aborted");
+
+        // Ensure color functions are fixed in the iframe document as well
+        try {
+          scanAndFixLabColorsInDoc(idoc);
+        } catch {
+          // ignore
+        }
+
+        // Compute scale so the rendered canvas maps to the PDF page dimensions.
+        // Use a higher export DPI to increase output resolution (default: 300 DPI).
+        const PREFERRED_DPI = 300;
+        // CSS px width for iframe sizing (uses 96dpi baseline)
+        const targetCssPxWidth = mmToPx(pageWidthMm);
+        // target pixel width at preferred DPI (px = mm * dpi / 25.4)
+        const targetPxWidth = (pageWidthMm * PREFERRED_DPI) / 25.4;
+        const bodyEl = idoc.body as HTMLElement;
+        const bodyWidth = Math.max(
+          1,
+          bodyEl.scrollWidth || bodyEl.clientWidth || targetCssPxWidth
+        );
+        // scale to match target width at preferred DPI (may be >> 1), ensure at least 1
+        const scale = Math.max(1, targetPxWidth / bodyWidth);
+
+        // Call html2canvas on the iframe's body with a guarded timeout and explicit window reference.
+        const html2canvasOptions: any = {
+          scale,
+          useCORS: true,
+          backgroundColor: null,
+          windowWidth: bodyEl.scrollWidth,
+          windowHeight: bodyEl.scrollHeight,
+        };
+        if ((iframe as any).contentWindow) {
+          html2canvasOptions.window = (iframe as any).contentWindow;
+        }
+        const renderTimeoutMs = 15000;
+        let canvas: HTMLCanvasElement;
+        try {
+          canvas = await Promise.race([
+            html2canvasLib(bodyEl, html2canvasOptions),
+            new Promise<HTMLCanvasElement>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("html2canvas render timeout")),
+                renderTimeoutMs
+              )
+            ),
+          ]);
+        } catch (e) {
+          // Retry once with lower scale to avoid hangs/timeouts.
+          try {
+            emitProgress({
+              stage: "render-retry",
+              message: "Retrying render with lower scale",
+            });
+            const retryScale =
+              typeof html2canvasOptions.scale === "number"
+                ? Math.max(
+                    1,
+                    Math.round(html2canvasOptions.scale * 0.8 * 100) / 100
+                  )
+                : 1;
+            const retryOptions = { ...html2canvasOptions, scale: retryScale };
+            const retryTimeoutMs = 12000;
+            canvas = await Promise.race([
+              html2canvasLib(bodyEl, retryOptions),
+              new Promise<HTMLCanvasElement>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("html2canvas render timeout")),
+                  retryTimeoutMs
+                )
+              ),
+            ]);
+          } catch (e2) {
+            // Final fallback: clone content to a hidden same-origin div and render that
+            emitProgress({
+              stage: "render-fallback",
+              message: "Falling back to same-origin DOM render",
+            });
+            const wrapper = document.createElement("div");
+            wrapper.style.position = "fixed";
+            wrapper.style.left = "-9999px";
+            wrapper.style.top = "-9999px";
+            wrapper.style.width = `${Math.round(mmToPx(pageWidthMm))}px`;
+            wrapper.style.height = `${Math.round(mmToPx(pageHeightMm))}px`;
+            wrapper.style.overflow = "auto";
+            wrapper.style.backgroundColor = "white";
+            // Clone the iframe body content into the wrapper
+            wrapper.innerHTML = bodyEl.innerHTML;
+            document.body.appendChild(wrapper);
+
+            try {
+              // Allow fonts/images a short moment to settle in the parent doc
+              await new Promise((r) => setTimeout(r, 200));
+
+              // Try rendering the wrapper (same-origin avoids iframe window issues)
+              const fallbackScale = Math.max(
+                1,
+                targetPxWidth / (wrapper.scrollWidth || targetPxWidth)
+              );
+              const fallbackTimeoutMs = 10000;
+              canvas = await Promise.race([
+                html2canvasLib(wrapper, {
+                  scale: fallbackScale,
+                  useCORS: true,
+                  backgroundColor: null,
+                }),
+                new Promise<HTMLCanvasElement>((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error("html2canvas render timeout")),
+                    fallbackTimeoutMs
+                  )
+                ),
+              ]);
+            } finally {
+              // Always cleanup the wrapper
+              try {
+                wrapper.remove();
+              } catch {}
+            }
+          }
+        }
+
+        if (signal.aborted) throw new Error("Export aborted");
+
+        // Convert canvas to image and add to PDF page (map pixel dims -> mm)
+        const imgData = canvas.toDataURL("image/jpeg", 0.95);
+
+        if (i > 0) {
+          pdf.addPage();
+        }
+        // Add image filling the page
+        pdf.addImage(
+          imgData,
+          "JPEG",
+          0,
+          0,
+          pageWidthMm,
+          pageHeightMm,
+          undefined,
+          "FAST"
+        );
+      } finally {
+        // Cleanup iframe
+        try {
+          iframe.remove();
+        } catch {}
+      }
+    }
+
+    emitProgress({ stage: "assemble", message: "Assembling PDF" });
+    if (signal.aborted) throw new Error("Export aborted");
+
+    // Output blob and trigger download
+    const blob = pdf.output ? pdf.output("blob") : null;
+    if (!blob) {
+      // fallback: use datauri string
+      try {
+        const dataUri = pdf.output("datauristring");
+        const parts = dataUri.split(",");
+        const byteString = atob(parts[1]);
+        const ia = new Uint8Array(byteString.length);
+        for (let i = 0; i < byteString.length; i++)
+          ia[i] = byteString.charCodeAt(i);
+        const fallbackBlob = new Blob([ia], { type: "application/pdf" });
+        await triggerDownload(fallbackBlob, fileName);
+      } catch (e) {
+        throw new Error("Failed to generate PDF blob");
+      }
+    } else {
+      await triggerDownload(blob as Blob, fileName);
+    }
+
+    emitProgress({ stage: "done", message: "PDF export complete" });
+  } catch (e: any) {
+    // propagate abort as a clear error so callers can show friendly message
+    if (e && e.message === "Export aborted") {
+      emitProgress({ stage: "aborted", message: "Export cancelled" });
+      throw e;
+    }
+    emitProgress({ stage: "error", message: e?.message || String(e) });
+    throw e;
+  } finally {
+    // Clear abort controller
+    try {
+      currentAbort = null;
+    } catch {}
+  }
+}
 
 export async function exportPreview(
   format: "pdf" | "html" | "markdown",
