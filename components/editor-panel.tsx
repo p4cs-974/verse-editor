@@ -15,12 +15,14 @@ interface EditorPanelProps {
   doc?: DocumentData | null;
   content: string;
   onChange: (newValue: string) => void;
+  onBlur?: () => void;
 }
 
 export default function EditorPanel({
   doc,
   content,
   onChange,
+  onBlur,
 }: EditorPanelProps) {
   return (
     <div className="h-full">
@@ -34,6 +36,7 @@ export default function EditorPanel({
           extensions={[markdown({ base: markdownLanguage })]}
           theme={"dark"}
           onChange={onChange}
+          onBlur={() => onBlur?.()}
           height="100%"
         />
       </div>

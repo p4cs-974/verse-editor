@@ -25,8 +25,41 @@ export default function EditorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"documents"> | null>(null);
   const [localContent, setLocalContent] = useState<string>("");
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [lastSavedContent, setLastSavedContent] = useState<string>("");
+  const [syncStatus, setSyncStatus] = useState<"local" | "synced">("synced");
+  const [lastSyncedContent, setLastSyncedContent] = useState<string>("");
+
+  // Retry/backoff and lifecycle guards
+  const retryAttemptRef = useRef(0);
+  const backoffTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+
+  // Track local draft timestamp for reconciliation/multi-tab
+  const localUpdatedAtRef = useRef<number>(0);
+
+  // Helpers for localStorage drafts
+  const draftKey = (id: Id<"documents">) => `draft-${id}`;
+  const loadDraft = (id: Id<"documents">) => {
+    try {
+      const raw = localStorage.getItem(draftKey(id));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { content: string; updatedAt: number };
+      if (
+        typeof parsed?.content === "string" &&
+        typeof parsed?.updatedAt === "number"
+      ) {
+        return parsed;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return null;
+  };
+  const saveDraft = (id: Id<"documents">, content: string) => {
+    const updatedAt = Date.now();
+    localStorage.setItem(draftKey(id), JSON.stringify({ content, updatedAt }));
+    localUpdatedAtRef.current = updatedAt;
+    return updatedAt;
+  };
 
   // load the selected document (returns null while not selected)
   // When no document is selected pass the "skip" sentinel so the hook doesn't run.
@@ -38,45 +71,9 @@ export default function EditorLayout() {
   // Track if we're in the middle of a document switch to avoid conflicts
   const documentSwitchingRef = useRef<boolean>(false);
 
-  // Sync database content to local state - only when document changes and no unsaved changes
-  useEffect(() => {
-    const incomingContent = selectedDoc?.markdownContent ?? "";
+  // (moved) Reconciliation effect is defined after saveHandle
 
-    // Skip if no document
-    if (!selectedDoc) {
-      return;
-    }
-
-    console.log("🔄 Document content sync triggered:", {
-      documentId: selectedDoc._id,
-      incomingContent: incomingContent.slice(0, 50) + "...",
-      currentLocalContent: localContent.slice(0, 50) + "...",
-      lastSavedContent: lastSavedContent.slice(0, 50) + "...",
-      hasUnsavedChanges,
-      documentSwitching: documentSwitchingRef.current,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Only sync from database if:
-    // 1. We're switching documents, OR
-    // 2. No unsaved changes AND (first load OR content matches last saved)
-    const shouldSync =
-      documentSwitchingRef.current ||
-      (!hasUnsavedChanges &&
-        (lastSavedContent === "" || incomingContent === lastSavedContent));
-
-    if (shouldSync) {
-      console.log("✅ Syncing database content to local editor");
-      setLocalContent(incomingContent);
-      setLastSavedContent(incomingContent);
-      setHasUnsavedChanges(false);
-      documentSwitchingRef.current = false;
-    } else if (hasUnsavedChanges) {
-      console.warn(
-        "⚠️ CONFLICT: Preserving local changes over database content"
-      );
-    }
-  }, [selectedDoc?.markdownContent, selectedDoc?._id]);
+  // (moved) Multi-tab storage sync effect is defined after saveHandle
 
   // list user's documents to auto-select or create a new one if needed
   const docs = useQuery(api.documents.listDocumentsForUser, {}) as Array<{
@@ -90,43 +87,164 @@ export default function EditorLayout() {
   // prevent duplicate auto-creation
   const creatingRef = useRef(false);
 
-  // Debounced save function
-  const debouncedSave = useDebouncedCallback(async (newValue: string) => {
+  // (moved) Lifecycle guard effect is defined after saveHandle
+
+  // When a document is selected, load draft immediately for instant UI
+  useEffect(() => {
     if (!selectedId) return;
-    console.log("💾 Debounced save triggered:", {
-      documentId: selectedId,
-      contentPreview: newValue.slice(0, 50) + "...",
-      timestamp: new Date().toISOString(),
-    });
+    const draft = loadDraft(selectedId as Id<"documents">);
+    if (draft) {
+      localUpdatedAtRef.current = draft.updatedAt;
+      setLocalContent(draft.content);
+      setSyncStatus(draft.content === lastSyncedContent ? "synced" : "local");
+    }
+  }, [selectedId, lastSyncedContent]);
+
+  // Debounced save function with backoff + lifecycle guards
+  const saveHandle = useDebouncedCallback(async (newValue: string) => {
+    if (!selectedId) return;
+
+    // Cancel any scheduled backoff retry before a fresh save
+    if (backoffTimerRef.current) {
+      window.clearTimeout(backoffTimerRef.current);
+      backoffTimerRef.current = null;
+    }
+
     try {
       await updateDocument({
         documentId: selectedId,
         markdownContent: newValue,
       });
-      console.log("✅ Save completed successfully");
-      // Update tracking after successful save
-      setLastSavedContent(newValue);
-      setHasUnsavedChanges(false);
-    } catch (_e) {
-      console.error("❌ Save failed:", _e);
-      // Keep unsaved changes flag on save failure
+
+      // On success update synced markers
+      setLastSyncedContent(newValue);
+      setSyncStatus("synced");
+      retryAttemptRef.current = 0;
+    } catch (err) {
+      // Keep local status and back off retries
+      const attempt = (retryAttemptRef.current = retryAttemptRef.current + 1);
+      const base = 500; // ms
+      const cap = 8000; // ms
+      const jitter = Math.random() * 200;
+      const delay = Math.min(cap, base * Math.pow(2, attempt)) + jitter;
+
+      // Non-intrusive console warning
+      console.warn(
+        "Save failed, will retry with backoff",
+        { attempt, delayMs: Math.round(delay) },
+        err
+      );
+
+      // Schedule a retry if still mounted
+      if (mountedRef.current) {
+        backoffTimerRef.current = window.setTimeout(() => {
+          // Re-enqueue save with latest content
+          saveHandle.call(localContent);
+        }, delay) as unknown as number;
+      }
     }
   }, 800);
 
-  // Handle content changes
-  const handleContentChange = (newValue: string) => {
-    console.log("✏️ User typing:", {
-      contentPreview: newValue.slice(0, 50) + "...",
-      timestamp: new Date().toISOString(),
-    });
-    setLocalContent(newValue);
+  // lifecycle guard: mark mounted/unmounted and cleanup timers
+  useEffect(() => {
+    mountedRef.current = true;
+    const onWindowBlur = () => {
+      // Flush pending save on window blur
+      saveHandle.flush();
+    };
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      mountedRef.current = false;
+      saveHandle.cancel();
+      if (backoffTimerRef.current) {
+        window.clearTimeout(backoffTimerRef.current);
+        backoffTimerRef.current = null;
+      }
+    };
+  }, [saveHandle]);
 
-    // Mark as having unsaved changes if content differs from last saved
-    if (newValue !== lastSavedContent) {
-      setHasUnsavedChanges(true);
+  // Reconcile local draft with server when the selected document changes
+  useEffect(() => {
+    if (!selectedId || !selectedDoc) return;
+
+    const draft = loadDraft(selectedId as Id<"documents">);
+    if (draft) {
+      localUpdatedAtRef.current = draft.updatedAt;
+      // Prefer local draft for instant UI
+      if (localContent !== draft.content) {
+        setLocalContent(draft.content);
+      }
+      if (draft.content === (selectedDoc.markdownContent ?? "")) {
+        setLastSyncedContent(draft.content);
+        setSyncStatus("synced");
+      } else {
+        setSyncStatus("local");
+        // Ensure we attempt to sync latest local to server
+        saveHandle.cancel();
+        saveHandle.call(draft.content);
+      }
+    } else {
+      const server = selectedDoc.markdownContent ?? "";
+      setLocalContent(server);
+      setLastSyncedContent(server);
+      setSyncStatus("synced");
+      if (selectedId) saveDraft(selectedId as Id<"documents">, server);
     }
 
-    debouncedSave(newValue);
+    documentSwitchingRef.current = false;
+  }, [selectedId, selectedDoc?._id, selectedDoc?.markdownContent, saveHandle]);
+
+  // Multi-tab sync: listen to storage updates from other tabs
+  useEffect(() => {
+    if (!selectedId) return;
+    const handler = (e: StorageEvent) => {
+      if (e.key !== draftKey(selectedId as Id<"documents">)) return;
+      try {
+        const parsed = e.newValue ? JSON.parse(e.newValue) : null;
+        if (!parsed) return;
+        const { content, updatedAt } = parsed as {
+          content: string;
+          updatedAt: number;
+        };
+        if (typeof content !== "string" || typeof updatedAt !== "number") {
+          return;
+        }
+        if (updatedAt > localUpdatedAtRef.current) {
+          localUpdatedAtRef.current = updatedAt;
+          setLocalContent(content);
+          const nowSynced = content === lastSyncedContent;
+          setSyncStatus(nowSynced ? "synced" : "local");
+          // Cancel current pending save and reschedule if needed
+          saveHandle.cancel();
+          if (!nowSynced) {
+            saveHandle.call(content);
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [selectedId, lastSyncedContent, saveHandle]);
+
+  // Handle content changes
+  const handleContentChange = (newValue: string) => {
+    setLocalContent(newValue);
+
+    // Persist immediately to localStorage
+    if (selectedId) {
+      saveDraft(selectedId as Id<"documents">, newValue);
+    }
+
+    // Status reflects local-only changes (blue) until server confirms
+    if (newValue !== lastSyncedContent) {
+      setSyncStatus("local");
+    }
+
+    // Debounced save to server
+    saveHandle.call(newValue);
   };
 
   useEffect(() => {
@@ -139,9 +257,7 @@ export default function EditorLayout() {
     if (docs.length > 0) {
       setSelectedId(docs[0]._id);
       setSidebarOpen(false);
-      // Reset tracking state when auto-selecting first document
-      setHasUnsavedChanges(false);
-      setLastSavedContent("");
+      documentSwitchingRef.current = true;
       return;
     }
 
@@ -150,16 +266,21 @@ export default function EditorLayout() {
       creatingRef.current = true;
       (async () => {
         try {
+          const initial = "# Untitled\n\n";
           const id = await createDocument({
             title: "Untitled",
-            markdownContent: "# Untitled\n\n",
+            markdownContent: initial,
             cssContent: DEFAULT_DOCUMENT_CSS,
           });
           if (id) {
-            setSelectedId(id as Id<"documents">);
-            // Reset tracking state for new document
-            setHasUnsavedChanges(false);
-            setLastSavedContent("# Untitled\n\n");
+            const casted = id as Id<"documents">;
+            setSelectedId(casted);
+            documentSwitchingRef.current = true;
+            // Seed localStorage and local state
+            saveDraft(casted, initial);
+            setLocalContent(initial);
+            setLastSyncedContent(initial);
+            setSyncStatus("synced");
           }
         } catch (err) {
           console.error("Auto-create document failed", err);
@@ -175,18 +296,23 @@ export default function EditorLayout() {
       <Toolbar
         sidebarOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((s) => !s)}
+        syncStatus={syncStatus}
       />
       <div className="flex flex-1 h-[calc(100vh-3.5rem)]">
         {sidebarOpen && (
           <DocumentsSidebar
             selectedId={selectedId}
             onSelect={(id) => {
+              // Cancel any pending save for current doc before switching
+              saveHandle.cancel();
+              if (backoffTimerRef.current) {
+                window.clearTimeout(backoffTimerRef.current);
+                backoffTimerRef.current = null;
+              }
               documentSwitchingRef.current = true;
               setSelectedId(id);
               setSidebarOpen(false);
-              // Reset tracking state when switching documents
-              setHasUnsavedChanges(false);
-              setLastSavedContent("");
+              // Let reconciliation effects load the right content/state
             }}
             onClose={() => setSidebarOpen(false)}
           />
@@ -199,6 +325,7 @@ export default function EditorLayout() {
               doc={selectedDoc}
               content={localContent}
               onChange={handleContentChange}
+              onBlur={() => saveHandle.flush()}
             />
           </div>
 
