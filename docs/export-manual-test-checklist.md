@@ -40,8 +40,9 @@ Export actions — PDF
 
 1. Ensure dependencies installed: npm i html2canvas jspdf
 2. Click Export → Export as PDF.
-3. Popover should show progress; Download a .pdf file.
+3. Popover should show progress stages: "Loading dependencies..." → "Rendering..." → "Rendering page X of Y" → Download a .pdf file.
 4. Open PDF and verify layout, images, fonts, and pagination per settings.
+5. If dependencies are missing, expect clear error messages with install instructions.
 
 Keyboard & Accessibility
 
