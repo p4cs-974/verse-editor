@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
+  <img src="public/logo.png" alt="Verse Editor Logo" width="200">
+</div>
 
-## Getting Started
+<div align="center">
+  <h1>Verse Web App</h1>
+</div>
 
-First, run the development server:
+Verse is a open source markdown editor that allows you to export your document to PDF, HTML, or just the raw Markdown file.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+The web app is built with a local-first approach, but your documents are also synced to the cloud so you can access them from anywhere.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+There should be a simpler way to convert markdown into documents, and Verse is an attempt to do just that.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Realtime preview of your markdown content with styling.
+- Auto save functionality
 
-## Learn More
+## For the future
 
-To learn more about Next.js, take a look at the following resources:
+### Priority
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Allow users to edit the styling of the document.
+- Allow users to further customize the export settings.
+- Add a custom image import feature via a toolbar button, to facilitate the inclusion of images in documents.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Nice to have
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Markdown snippets insertion via a toolbar button.
+- AI features to help with writing and styling.
