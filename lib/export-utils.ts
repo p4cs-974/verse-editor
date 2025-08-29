@@ -889,7 +889,8 @@ export async function exportToPdf(
       iframe.style.left = "-9999px";
       iframe.style.top = "-9999px";
       iframe.style.width = `${Math.round(mmToPx(pageWidthMm))}px`;
-      iframe.style.height = `${Math.round(mmToPx(pageHeightMm))}px`;
+      // Initially set a minimal height; we'll resize to fit content after load
+      iframe.style.height = `200px`;
       // Allow scripts so the iframe can run font-loading / CSSOM related tasks.
       // This is reasonably safe because exported HTML is produced by
       // `serializePreviewToHTML()` which removes <script> tags and event attributes.
@@ -960,6 +961,21 @@ export async function exportToPdf(
           // ignore
         }
 
+        // Reflow iframe to match full content height so we can capture the entire document
+        const bodyEl = idoc.body as HTMLElement;
+        const contentHeightCssPx = Math.max(
+          bodyEl.scrollHeight ||
+            bodyEl.clientHeight ||
+            Math.round(mmToPx(pageHeightMm)),
+          Math.round(mmToPx(pageHeightMm))
+        );
+        // Resize iframe to the content height so html2canvas captures the full document
+        try {
+          iframe.style.height = `${Math.ceil(contentHeightCssPx)}px`;
+        } catch {
+          // ignore: failure to set iframe height is non-critical for export
+        }
+
         // Compute scale so the rendered canvas maps to the PDF page dimensions.
         // Use a higher export DPI to increase output resolution (default: 300 DPI).
         const PREFERRED_DPI = 300;
@@ -967,7 +983,6 @@ export async function exportToPdf(
         const targetCssPxWidth = mmToPx(pageWidthMm);
         // target pixel width at preferred DPI (px = mm * dpi / 25.4)
         const targetPxWidth = (pageWidthMm * PREFERRED_DPI) / 25.4;
-        const bodyEl = idoc.body as HTMLElement;
         const bodyWidth = Math.max(
           1,
           bodyEl.scrollWidth || bodyEl.clientWidth || targetCssPxWidth
@@ -976,10 +991,11 @@ export async function exportToPdf(
         const scale = Math.max(1, targetPxWidth / bodyWidth);
 
         // Call html2canvas on the iframe's body with a guarded timeout and explicit window reference.
+        // Set a white background to avoid black bars when converting to JPEG/PNG.
         const html2canvasOptions: any = {
           scale,
           useCORS: true,
-          backgroundColor: null,
+          backgroundColor: "#ffffff",
           windowWidth: bodyEl.scrollWidth,
           windowHeight: bodyEl.scrollHeight,
         };
@@ -1055,7 +1071,7 @@ export async function exportToPdf(
                 html2canvasLib(wrapper, {
                   scale: fallbackScale,
                   useCORS: true,
-                  backgroundColor: null,
+                  backgroundColor: "#ffffff",
                 }),
                 new Promise<HTMLCanvasElement>((_, reject) =>
                   setTimeout(
@@ -1075,23 +1091,64 @@ export async function exportToPdf(
 
         if (signal.aborted) throw new Error("Export aborted");
 
-        // Convert canvas to image and add to PDF page (map pixel dims -> mm)
-        const imgData = canvas.toDataURL("image/jpeg", 0.95);
-
-        if (i > 0) {
-          pdf.addPage();
-        }
-        // Add image filling the page
-        pdf.addImage(
-          imgData,
-          "JPEG",
-          0,
-          0,
-          pageWidthMm,
-          pageHeightMm,
-          undefined,
-          "FAST"
+        // We may have a very tall canvas (full document). Slice it vertically into page-sized images
+        // so content naturally flows across PDF pages without distortion.
+        const pageHeightCanvasPx = (pageHeightMm * PREFERRED_DPI) / 25.4;
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        const slices = Math.max(
+          1,
+          Math.ceil(canvasHeight / pageHeightCanvasPx)
         );
+
+        for (let s = 0; s < slices; s++) {
+          if (signal.aborted) throw new Error("Export aborted");
+          const startY = Math.round(s * pageHeightCanvasPx);
+          const sliceHeight = Math.min(
+            Math.round(pageHeightCanvasPx),
+            canvasHeight - startY
+          );
+
+          // Create a page-sized canvas and draw the slice into it. Ensure white background so short content doesn't show transparent/black.
+          const pageCanvas = document.createElement("canvas");
+          pageCanvas.width = canvasWidth;
+          pageCanvas.height = Math.round(pageHeightCanvasPx); // always full page height
+          const ctx = pageCanvas.getContext("2d");
+          if (!ctx) throw new Error("Failed to create canvas context");
+          // Fill white background
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+
+          // Draw the slice (if the last slice is shorter, it will be drawn at the top and the remaining area stays white).
+          ctx.drawImage(
+            canvas,
+            0,
+            startY,
+            canvasWidth,
+            sliceHeight,
+            0,
+            0,
+            pageCanvas.width,
+            sliceHeight
+          );
+
+          const imgData = pageCanvas.toDataURL("image/png");
+
+          if (i > 0 || s > 0) {
+            pdf.addPage();
+          }
+          // Add image filling the page
+          pdf.addImage(
+            imgData,
+            "PNG",
+            0,
+            0,
+            pageWidthMm,
+            pageHeightMm,
+            undefined,
+            "FAST"
+          );
+        }
       } finally {
         // Cleanup iframe
         try {

@@ -11,6 +11,7 @@ export const DEFAULT_DOCUMENT_CSS = `
   padding: 40px;
   max-width: 800px;
   margin: 0 auto;
+  min-height: 1123px; /* ~A4 height at 96dpi to avoid short content leaving empty page */
 }
 
 .verse-preview-content h1 {
@@ -69,7 +70,7 @@ export const DEFAULT_DOCUMENT_CSS = `
 }
 
 .verse-preview-content img {
-  max-width: 400px;
+  max-width: 100%;
   height: auto;
   border-radius: 5px;
   margin: 1em 0;
