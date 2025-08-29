@@ -18,7 +18,7 @@ export default function Home() {
         {/* </AuthDebug> */}
       </Authenticated>
       <Unauthenticated>
-        <div className="w-full p-6 text-center whitespace-nowrap">
+        <div className="min-h-screen flex flex-col items-center justify-center w-full p-6 text-center whitespace-nowrap">
           <p className="mb-4 flex flex-row gap-2 justify-center items-center">
             Welcome to Verse, sign in using your{" "}
             <a

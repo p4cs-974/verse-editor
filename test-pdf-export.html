@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verse PDF Export Slicing Test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --page-width-mm: 210; /* A4 width in mm */
+      --page-height-mm: 297; /* A4 height in mm */
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #2b2b2b;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #111;
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      z-index: 10;
+    }
+    .toolbar button {
+      background: #0ea5e9;
+      color: #001018;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .toolbar button:hover {
+      background: #38bdf8;
+    }
+    .wrap {
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+    }
+    /* Page-like container to simulate preview panel */
+    .page {
+      background: #ffffff;
+      color: #000000;
+      width: 800px; /* ~ A4 width at 96dpi */
+      min-height: 1123px; /* ~ A4 height at 96dpi to visually fill page when content is short */
+      box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+      border-radius: 4px;
+      padding: 40px;
+    }
+    .page h1 {
+      font-size: 2.2em;
+      margin: 0 0 0.7em 0;
+      border-bottom: 2px solid #e5e5e5;
+      padding-bottom: 0.4em;
+    }
+    .page h2 {
+      margin-top: 1.8em;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 0.3em;
+    }
+    .page p { line-height: 1.6; }
+    .page blockquote {
+      border-left: 4px solid #e0e0e0;
+      padding-left: 1em;
+      background: #f9f9f9;
+      margin: 1em 0;
+      color: #333;
+      font-style: italic;
+    }
+    .page img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 5px;
+      margin: 1em 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .page hr {
+      border: none;
+      border-top: 1px solid #e0e0e0;
+      margin: 2em 0;
+    }
+    .note {
+      color: #ddd;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+  </style>
+  <!-- CDN libs for testing outside Next.js runtime -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="export">Export PDF (sliced A4)</button>
+    <span class="note">This page is a standalone test harness to validate page slicing and white background (no black bars).</span>
+  </div>
+
+  <div class="wrap">
+    <div id="content" class="page">
+      <h1>Verse PDF Export — Slicing & White Background Test</h1>
+      <p>
+        This test validates the white background fill, natural page breaks via canvas slicing,
+        and that short content still occupies a full page visually.
+      </p>
+      <blockquote>
+        You can add more paragraphs below or remove some to simulate short/long content,
+        then click the Export PDF button to verify the output looks like a standard document.
+      </blockquote>
+
+      <h2>Section 1</h2>
+      <p>
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer bibendum arcu at orci
+        ullamcorper, vitae auctor nisl imperdiet. Donec dignissim, leo non efficitur elementum,
+        ante orci posuere lorem, id faucibus orci quam id nulla.
+      </p>
+      <p>
+        Phasellus non magna sed lacus vestibulum dapibus quis non lorem. Sed in laoreet libero.
+        Nunc sed est sed odio ullamcorper porta at non ipsum. Vestibulum auctor arcu vitae accumsan aliquam.
+      </p>
+
+      <img src="https://picsum.photos/900/300" alt="Sample" loading="lazy" />
+
+      <h2>Section 2</h2>
+      <p>
+        Suspendisse vitae eros ut lacus aliquam feugiat. Curabitur lacinia, nibh eget hendrerit viverra,
+        tortor dui tincidunt lacus, vitae maximus arcu lacus ut nibh.
+      </p>
+
+      <hr />
+
+      <h2>Section 3 (More Content)</h2>
+      <p>
+        Mauris id augue nisi. Phasellus blandit metus id bibendum luctus. Aliquam erat volutpat. Aliquam luctus
+        justo non tortor fermentum porta. Donec rhoncus elit neque, in tristique arcu ullamcorper a.
+      </p>
+      <p>
+        Cras imperdiet dignissim justo nec lacinia. Integer volutpat commodo nibh, non congue orci sagittis in.
+        Pellentesque venenatis urna sed magna hendrerit, sed finibus augue gravida.
+      </p>
+      <p>
+        Add or remove these paragraphs to simulate different heights and test page slicing precisely at A4 height.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    function mmToPx(mm, dpi = 96) {
+      return (mm * dpi) / 25.4;
+    }
+
+    async function exportSlicedA4() {
+      const content = document.getElementById('content');
+      if (!content) return;
+
+      const pageWidthMm = 210;   // A4 portrait
+      const pageHeightMm = 297;
+
+      // Compute scale to target export DPI (higher => sharper PDF)
+      const PREFERRED_DPI = 300;
+      const targetPxWidth = (pageWidthMm * PREFERRED_DPI) / 25.4;
+      const cssWidth = content.scrollWidth || content.clientWidth || mmToPx(pageWidthMm);
+      const scale = Math.max(1, targetPxWidth / cssWidth);
+
+      // Render entire content area into a single tall canvas
+      const canvas = await html2canvas(content, {
+        scale,
+        useCORS: true,
+        backgroundColor: '#ffffff', // ensure white background (no black bars)
+        windowWidth: content.scrollWidth,
+        windowHeight: content.scrollHeight
+      });
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      // Page height in the rendered canvas' pixel space for the export DPI
+      const pageHeightCanvasPx = (pageHeightMm * PREFERRED_DPI) / 25.4;
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const slices = Math.max(1, Math.ceil(ch / pageHeightCanvasPx));
+
+      for (let s = 0; s < slices; s++) {
+        const startY = Math.round(s * pageHeightCanvasPx);
+        const sliceHeight = Math.min(Math.round(pageHeightCanvasPx), ch - startY);
+
+        // White-backed page-sized canvas
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = cw;
+        pageCanvas.height = Math.round(pageHeightCanvasPx);
+        const ctx = pageCanvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+
+        // Draw slice at the top; any remaining area stays white
+        ctx.drawImage(canvas, 0, startY, cw, sliceHeight, 0, 0, cw, sliceHeight);
+
+        const imgData = pageCanvas.toDataURL('image/png');
+        if (s > 0) pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, 0, pageWidthMm, pageHeightMm, undefined, 'FAST');
+      }
+
+      pdf.save('verse-export-test.pdf');
+    }
+
+    document.getElementById('export').addEventListener('click', () => {
+      exportSlicedA4().catch((e) => {
+        console.error('Export failed:', e);
+        alert('Export failed: ' + (e?.message || e));
+      });
+    });
+  </script>
+</body>
+</html>
