@@ -972,7 +972,9 @@ export async function exportToPdf(
         // Resize iframe to the content height so html2canvas captures the full document
         try {
           iframe.style.height = `${Math.ceil(contentHeightCssPx)}px`;
-        } catch {}
+        } catch {
+          // ignore: failure to set iframe height is non-critical for export
+        }
 
         // Compute scale so the rendered canvas maps to the PDF page dimensions.
         // Use a higher export DPI to increase output resolution (default: 300 DPI).
