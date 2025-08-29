@@ -123,8 +123,8 @@ function labToXyz(L: number, a: number, b: number) {
   const fy3 = Math.pow(fy, 3);
   const fz3 = Math.pow(fz, 3);
 
-  const epsilon = 0.008856; // (6/29)^3
-  const kappa = 903.3;
+  const epsilon = 0.008856; // (6/29)ˆ3
+  const kappa = 903.3; // (29/3)^3
 
   const xr = fx3 > epsilon ? fx3 : (116 * fx - 16) / kappa;
   const yr = fy3 > epsilon ? fy3 : (116 * fy - 16) / kappa;
