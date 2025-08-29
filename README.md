@@ -6,9 +6,11 @@
   <h1>Verse Web App</h1>
 </div>
 
-![Screenshot](screenshot.png)
+<div align="center">
+  <img src="public/screenshot.png" alt="Verse Editor Screenshot" width="800">
+</div>
 
-Verse is a open source markdown editor that allows you to export your document to PDF, HTML, or just the raw Markdown file.
+Verse is an open source markdown editor that allows you to export your document to PDF, HTML, or just the raw Markdown file.
 
 The web app is built with a local-first approach, but your documents are also synced to the cloud so you can access them from anywhere.
 
