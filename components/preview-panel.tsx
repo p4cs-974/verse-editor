@@ -97,11 +97,9 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
     // After insertion, replace newly-inserted images with preserved ones
     // when possible to avoid reloading the resource.
     const newImgs = Array.from(container.querySelectorAll("img"));
-    const newSrcs: string[] = [];
     let preservedCount = 0;
     for (const newImg of newImgs) {
       const s = newImg.getAttribute("src") ?? "";
-      if (s) newSrcs.push(s);
       const preserved = s ? imgMap.get(s) : undefined;
       if (preserved) {
         preservedCount++;
