@@ -70,7 +70,7 @@ export default function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const css = doc?.cssContent ?? "";
 
   return (
-    <div className="h-full p-4 overflow-auto">
+    <div className="h-full p-4 overflow-auto" data-export-preview>
       {/* Inject document-specific CSS */}
       <style>{css}</style>
 
