@@ -3,7 +3,7 @@
 import { Files } from "lucide-react";
 import { useEffect, useState } from "react";
 import ToolbarButton from "./ui/toolbar-button";
-import SyncStatusDot from "@/src/components/SyncStatusDot";
+import SyncStatusDot from "@/components/ui/SyncStatusDot";
 import ExportToolbarButton from "./ui/export-toolbar-button";
 import ExportSettingsButton from "./ui/export-settings-button";
 
