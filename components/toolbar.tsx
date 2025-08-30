@@ -7,6 +7,7 @@ import SyncStatusDot from "@/components/ui/SyncStatusDot";
 import ExportToolbarButton from "./ui/export-toolbar-button";
 import ExportSettingsButton from "./ui/export-settings-button";
 import StyleToolbarButton from "@/components/ui/style-toolbar-button";
+import GalleryToolbarButton from "@/components/ui/gallery-toolbar-button";
 import type { Id } from "../convex/_generated/dataModel";
 
 export default function Toolbar({
@@ -58,6 +59,7 @@ export default function Toolbar({
           ariaPressed={sidebarOpen}
         />
         <StyleToolbarButton documentId={documentId} cssContent={cssContent} />
+        <GalleryToolbarButton />
       </div>
 
       <div className="flex items-center gap-2">
