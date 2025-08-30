@@ -52,7 +52,13 @@ export default function DocumentsSidebar({
       });
       setCreatingTitle("");
       // select the newly created document
-      if (id) onSelect(id as Id<"documents">);
+      if (id) {
+        // Seed per-document CSS in localStorage so the styling sidebar picks it up
+        try {
+          localStorage.setItem(`md-editor:user-css:${id}`, JSON.stringify({}));
+        } catch {}
+        onSelect(id as Id<"documents">);
+      }
     } catch (e) {
       console.error("Create failed", e);
       alert("Create failed: " + (e instanceof Error ? e.message : String(e)));

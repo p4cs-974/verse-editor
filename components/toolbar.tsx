@@ -1,6 +1,6 @@
 "use client";
 
-import { Files } from "lucide-react";
+import { Files, Paintbrush } from "lucide-react";
 import { useEffect, useState } from "react";
 import ToolbarButton from "./ui/toolbar-button";
 import SyncStatusDot from "@/components/ui/SyncStatusDot";
@@ -10,10 +10,14 @@ import ExportSettingsButton from "./ui/export-settings-button";
 export default function Toolbar({
   sidebarOpen,
   onToggle,
+  stylebarOpen = false,
+  onToggleStyles,
   syncStatus = "synced",
 }: {
   sidebarOpen: boolean;
   onToggle: () => void;
+  stylebarOpen?: boolean;
+  onToggleStyles?: () => void;
   syncStatus?: "local" | "synced";
 }) {
   const [exportOpen, setExportOpen] = useState(false);
@@ -50,6 +54,14 @@ export default function Toolbar({
           isActive={sidebarOpen}
           ariaLabel="Toggle documents sidebar"
           ariaPressed={sidebarOpen}
+        />
+        <ToolbarButton
+          icon={Paintbrush}
+          label="Styles"
+          onClick={onToggleStyles}
+          isActive={!!stylebarOpen}
+          ariaLabel="Toggle styles sidebar"
+          ariaPressed={!!stylebarOpen}
         />
       </div>
 

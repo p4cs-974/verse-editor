@@ -11,6 +11,7 @@ import Toolbar from "./toolbar";
 import DocumentsSidebar from "./documents-sidebar";
 import EditorPanel from "./editor-panel";
 import PreviewPanel from "./preview-panel";
+import StylingSidebar from "./styling-sidebar";
 
 /**
  * EditorLayout — composes toolbar, optional documents sidebar, editor and preview.
@@ -23,6 +24,7 @@ import PreviewPanel from "./preview-panel";
  */
 export default function EditorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [stylebarOpen, setStylebarOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"documents"> | null>(null);
   const [localContent, setLocalContent] = useState<string>("");
   const [syncStatus, setSyncStatus] = useState<"local" | "synced">("synced");
@@ -83,6 +85,15 @@ export default function EditorLayout() {
   const createDocument = useMutation(api.documents.createDocument);
   const updateDocument = useMutation(api.documents.updateDocument);
   const { isSignedIn } = useAuth();
+
+  // persist current document css to localStorage whenever it changes
+  useEffect(() => {
+    if (!selectedId) return;
+    try {
+      const css = selectedDoc?.cssContent ?? "";
+      localStorage.setItem(`md-editor:css-raw:${selectedId}`, css);
+    } catch {}
+  }, [selectedId, selectedDoc?.cssContent]);
 
   // prevent duplicate auto-creation
   const creatingRef = useRef(false);
@@ -276,6 +287,20 @@ export default function EditorLayout() {
             const casted = id as Id<"documents">;
             setSelectedId(casted);
             documentSwitchingRef.current = true;
+
+            // Persist default CSS to localStorage for this document (per-document key).
+            // We store an empty map so the sidebar hydrates from cssContent on first open.
+            try {
+              localStorage.setItem(
+                `md-editor:user-css:${casted}`,
+                JSON.stringify({})
+              );
+              localStorage.setItem(
+                `md-editor:css-raw:${casted}`,
+                DEFAULT_DOCUMENT_CSS
+              );
+            } catch {}
+
             // Seed localStorage and local state
             saveDraft(casted, initial);
             setLocalContent(initial);
@@ -296,6 +321,8 @@ export default function EditorLayout() {
       <Toolbar
         sidebarOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((s) => !s)}
+        stylebarOpen={stylebarOpen}
+        onToggleStyles={() => setStylebarOpen((s) => !s)}
         syncStatus={syncStatus}
       />
       <div className="flex flex-1 h-[calc(100vh-3.5rem)]">
@@ -319,7 +346,7 @@ export default function EditorLayout() {
         )}
 
         {/* Editor and Preview split */}
-        <div className="flex-1 flex">
+        <div className="flex-1 flex min-w-0">
           <div className="w-1/2 border-r">
             <EditorPanel
               doc={selectedDoc}
@@ -329,8 +356,17 @@ export default function EditorLayout() {
             />
           </div>
 
-          <div className="w-1/2">
+          <div className="w-1/2 relative min-w-0">
             <PreviewPanel doc={selectedDoc} content={localContent} />
+            {stylebarOpen && (
+              <div className="absolute top-0 right-0 h-full">
+                <StylingSidebar
+                  documentId={selectedId}
+                  cssContent={selectedDoc?.cssContent ?? null}
+                  onClose={() => setStylebarOpen(false)}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
