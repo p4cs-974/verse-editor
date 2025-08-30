@@ -19,7 +19,8 @@ There should be a simpler way to convert markdown into documents, and Verse is a
 ## Features
 
 - Realtime preview of your markdown content with styling.
-- Auto save functionality
+- Auto save functionality.
+- Exporting to PDF, HTML and Markdown.
 
 ## For the future
 
@@ -33,3 +34,4 @@ There should be a simpler way to convert markdown into documents, and Verse is a
 
 - Markdown snippets insertion via a toolbar button.
 - AI features to help with writing and styling.
+- Support for extended markdown
