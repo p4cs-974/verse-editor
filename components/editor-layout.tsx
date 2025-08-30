@@ -11,7 +11,6 @@ import Toolbar from "./toolbar";
 import DocumentsSidebar from "./documents-sidebar";
 import EditorPanel from "./editor-panel";
 import PreviewPanel from "./preview-panel";
-import StylingSidebar from "./styling-sidebar";
 
 /**
  * EditorLayout — composes toolbar, optional documents sidebar, editor and preview.
@@ -24,7 +23,6 @@ import StylingSidebar from "./styling-sidebar";
  */
 export default function EditorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [stylebarOpen, setStylebarOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"documents"> | null>(null);
   const [localContent, setLocalContent] = useState<string>("");
   const [syncStatus, setSyncStatus] = useState<"local" | "synced">("synced");
@@ -321,8 +319,8 @@ export default function EditorLayout() {
       <Toolbar
         sidebarOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((s) => !s)}
-        stylebarOpen={stylebarOpen}
-        onToggleStyles={() => setStylebarOpen((s) => !s)}
+        documentId={selectedId}
+        cssContent={selectedDoc?.cssContent ?? null}
         syncStatus={syncStatus}
       />
       <div className="flex flex-1 h-[calc(100vh-3.5rem)]">
@@ -358,15 +356,7 @@ export default function EditorLayout() {
 
           <div className="w-1/2 relative min-w-0">
             <PreviewPanel doc={selectedDoc} content={localContent} />
-            {stylebarOpen && (
-              <div className="absolute top-0 right-0 h-full">
-                <StylingSidebar
-                  documentId={selectedId}
-                  cssContent={selectedDoc?.cssContent ?? null}
-                  onClose={() => setStylebarOpen(false)}
-                />
-              </div>
-            )}
+            {/* removed old sidebar */}
           </div>
         </div>
       </div>

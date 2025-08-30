@@ -1,24 +1,26 @@
 "use client";
 
-import { Files, Paintbrush } from "lucide-react";
+import { Files } from "lucide-react";
 import { useEffect, useState } from "react";
 import ToolbarButton from "./ui/toolbar-button";
 import SyncStatusDot from "@/components/ui/SyncStatusDot";
 import ExportToolbarButton from "./ui/export-toolbar-button";
 import ExportSettingsButton from "./ui/export-settings-button";
+import StyleToolbarButton from "@/components/ui/style-toolbar-button";
+import type { Id } from "../convex/_generated/dataModel";
 
 export default function Toolbar({
   sidebarOpen,
   onToggle,
-  stylebarOpen = false,
-  onToggleStyles,
   syncStatus = "synced",
+  documentId,
+  cssContent,
 }: {
   sidebarOpen: boolean;
   onToggle: () => void;
-  stylebarOpen?: boolean;
-  onToggleStyles?: () => void;
   syncStatus?: "local" | "synced";
+  documentId?: Id<"documents"> | null;
+  cssContent?: string | null;
 }) {
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -55,14 +57,7 @@ export default function Toolbar({
           ariaLabel="Toggle documents sidebar"
           ariaPressed={sidebarOpen}
         />
-        <ToolbarButton
-          icon={Paintbrush}
-          label="Styles"
-          onClick={onToggleStyles}
-          isActive={!!stylebarOpen}
-          ariaLabel="Toggle styles sidebar"
-          ariaPressed={!!stylebarOpen}
-        />
+        <StyleToolbarButton documentId={documentId} cssContent={cssContent} />
       </div>
 
       <div className="flex items-center gap-2">
