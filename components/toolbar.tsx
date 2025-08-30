@@ -47,7 +47,7 @@ export default function Toolbar({
   }, []);
 
   return (
-    <div className="h-14 border-b bg-background/95 flex items-center px-3 justify-between">
+    <div className="h-14 border-b bg-background/95 flex items-center px-16 justify-between">
       <div className="flex items-center gap-2">
         <ToolbarButton
           icon={Files}
