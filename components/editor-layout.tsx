@@ -8,7 +8,6 @@ import type { Id } from "../convex/_generated/dataModel";
 import { useDebouncedCallback } from "@/lib/useDebouncedSave";
 import { DEFAULT_DOCUMENT_CSS } from "@/lib/default-document-styles";
 import Toolbar from "./toolbar";
-import DocumentsSidebar from "./documents-sidebar";
 import EditorPanel from "./editor-panel";
 import PreviewPanel from "./preview-panel";
 
@@ -22,7 +21,6 @@ import PreviewPanel from "./preview-panel";
  * - If the user is not signed in, don't attempt to create a document; do nothing.
  */
 export default function EditorLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"documents"> | null>(null);
   const [localContent, setLocalContent] = useState<string>("");
   const [syncStatus, setSyncStatus] = useState<"local" | "synced">("synced");
@@ -265,7 +263,6 @@ export default function EditorLayout() {
     // If user has existing documents, select the first one.
     if (docs.length > 0) {
       setSelectedId(docs[0]._id);
-      setSidebarOpen(false);
       documentSwitchingRef.current = true;
       return;
     }
@@ -317,32 +314,22 @@ export default function EditorLayout() {
   return (
     <div className="flex flex-col h-screen">
       <Toolbar
-        sidebarOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen((s) => !s)}
         documentId={selectedId}
         cssContent={selectedDoc?.cssContent ?? null}
         syncStatus={syncStatus}
+        onSelectDocument={(id) => {
+          // Cancel any pending save for current doc before switching
+          saveHandle.cancel();
+          if (backoffTimerRef.current) {
+            window.clearTimeout(backoffTimerRef.current);
+            backoffTimerRef.current = null;
+          }
+          documentSwitchingRef.current = true;
+          setSelectedId(id);
+          // popover closes itself via onClose
+        }}
       />
       <div className="flex flex-1 h-[calc(100vh-3.5rem)]">
-        {sidebarOpen && (
-          <DocumentsSidebar
-            selectedId={selectedId}
-            onSelect={(id) => {
-              // Cancel any pending save for current doc before switching
-              saveHandle.cancel();
-              if (backoffTimerRef.current) {
-                window.clearTimeout(backoffTimerRef.current);
-                backoffTimerRef.current = null;
-              }
-              documentSwitchingRef.current = true;
-              setSelectedId(id);
-              setSidebarOpen(false);
-              // Let reconciliation effects load the right content/state
-            }}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
-
         {/* Editor and Preview split */}
         <div className="flex-1 flex min-w-0">
           <div className="w-1/2 border-r">

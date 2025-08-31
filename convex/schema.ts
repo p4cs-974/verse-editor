@@ -16,6 +16,10 @@ export default defineSchema({
     ownerId: v.string(),
     // Public file URL returned by UploadThing
     fileUrl: v.string(),
+    // UploadThing file key (for deletion/management)
+    fileKey: v.string(),
+    // File name without extension
+    fileName: v.string(),
     // Client-provided upload timestamp (ms since epoch)
     uploadedAt: v.number(),
     // Optional helpful metadata

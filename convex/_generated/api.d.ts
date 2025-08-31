@@ -15,6 +15,7 @@ import type {
 } from "convex/server";
 import type * as documents from "../documents.js";
 import type * as userImages from "../userImages.js";
+import type * as userImagesActions from "../userImagesActions.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -27,6 +28,7 @@ import type * as userImages from "../userImages.js";
 declare const fullApi: ApiFromModules<{
   documents: typeof documents;
   userImages: typeof userImages;
+  userImagesActions: typeof userImagesActions;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

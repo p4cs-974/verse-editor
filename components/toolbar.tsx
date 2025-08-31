@@ -9,19 +9,18 @@ import ExportSettingsButton from "./ui/export-settings-button";
 import StyleToolbarButton from "@/components/ui/style-toolbar-button";
 import GalleryToolbarButton from "@/components/ui/gallery-toolbar-button";
 import type { Id } from "../convex/_generated/dataModel";
+import DocumentsToolbarButton from "@/components/ui/documents-toolbar-button";
 
 export default function Toolbar({
-  sidebarOpen,
-  onToggle,
   syncStatus = "synced",
   documentId,
   cssContent,
+  onSelectDocument,
 }: {
-  sidebarOpen: boolean;
-  onToggle: () => void;
   syncStatus?: "local" | "synced";
   documentId?: Id<"documents"> | null;
   cssContent?: string | null;
+  onSelectDocument: (id: Id<"documents">) => void;
 }) {
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -50,13 +49,9 @@ export default function Toolbar({
   return (
     <div className="h-14 border-b bg-background/95 flex items-center px-16 justify-between">
       <div className="flex items-center gap-2">
-        <ToolbarButton
-          icon={Files}
-          label="Documents"
-          onClick={onToggle}
-          isActive={sidebarOpen}
-          ariaLabel="Toggle documents sidebar"
-          ariaPressed={sidebarOpen}
+        <DocumentsToolbarButton
+          selectedId={documentId}
+          onSelect={onSelectDocument}
         />
         <StyleToolbarButton documentId={documentId} cssContent={cssContent} />
         <GalleryToolbarButton />

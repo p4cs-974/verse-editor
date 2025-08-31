@@ -5,6 +5,16 @@ const f = createUploadthing();
 
 const auth = (req: Request) => ({ id: "fakeId" }); // Fake auth function
 
+function baseNameNoExt(filename: string): string {
+  const lastSlash = Math.max(
+    filename.lastIndexOf("/"),
+    filename.lastIndexOf("\\")
+  );
+  const name = lastSlash >= 0 ? filename.slice(lastSlash + 1) : filename;
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(0, i) : name;
+}
+
 // FileRouter for your app, can contain multiple FileRoutes
 export const ourFileRouter = {
   // Define as many FileRoutes as you like, each with a unique routeSlug
@@ -39,6 +49,8 @@ export const ourFileRouter = {
       return {
         uploadedBy: metadata.userId,
         fileUrl: file.ufsUrl,
+        fileKey: file.key,
+        fileName: baseNameNoExt(file.name ?? "file"),
         uploadedAt: Date.now(),
         contentType: file.type,
         size: file.size,
