@@ -35,8 +35,14 @@ export const ourFileRouter = {
 
       console.log("file url", file.ufsUrl);
 
-      // !!! Whatever is returned here is sent to the clientside `onClientUploadComplete` callback
-      return { uploadedBy: metadata.userId };
+      // Return structured data for the client to record in Convex/localStorage
+      return {
+        uploadedBy: metadata.userId,
+        fileUrl: file.ufsUrl,
+        uploadedAt: Date.now(),
+        contentType: file.type,
+        size: file.size,
+      };
     }),
 } satisfies FileRouter;
 

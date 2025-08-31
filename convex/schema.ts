@@ -9,4 +9,19 @@ export default defineSchema({
     cssContent: v.optional(v.string()),
     ownerId: v.string(),
   }).index("by_ownerId", ["ownerId"]),
+
+  // Images uploaded by Clerk users via UploadThing (ownerId is the Clerk user id as a string)
+  userImages: defineTable({
+    // Clerk user id
+    ownerId: v.string(),
+    // Public file URL returned by UploadThing
+    fileUrl: v.string(),
+    // Client-provided upload timestamp (ms since epoch)
+    uploadedAt: v.number(),
+    // Optional helpful metadata
+    contentType: v.optional(v.string()),
+    size: v.optional(v.number()), // bytes
+  })
+    .index("by_ownerId", ["ownerId"]) // list images for a user
+    .index("by_ownerId_and_uploadedAt", ["ownerId", "uploadedAt"]), // paginate/sort per user by upload time
 });
