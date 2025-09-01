@@ -96,7 +96,12 @@ export default function DocumentsPopoverContent({
     <div className="w-[420px] max-w-[90vw] p-3">
       <div className="flex items-center justify-between mb-2">
         <strong>Documents</strong>
-        <Button variant="ghost" size="sm" aria-label="Close" onClick={() => onClose?.()}>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Close"
+          onClick={() => onClose?.()}
+        >
           Close
         </Button>
       </div>
@@ -112,7 +117,11 @@ export default function DocumentsPopoverContent({
           <Button size="sm" onClick={handleCreate}>
             Create
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setCreatingTitle("")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCreatingTitle("")}
+          >
             Reset
           </Button>
         </div>
@@ -162,7 +171,11 @@ export default function DocumentsPopoverContent({
                     </span>
                   </Button>
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => startEditing(d._id, d.title)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startEditing(d._id, d.title)}
+                    >
                       Rename
                     </Button>
                     <Button

@@ -26,6 +26,9 @@ export default function EditorLayout() {
   const [syncStatus, setSyncStatus] = useState<"local" | "synced">("synced");
   const [lastSyncedContent, setLastSyncedContent] = useState<string>("");
 
+  // Local-first: remember last opened doc id
+  const LAST_DOC_KEY = "md-editor:last-doc-id";
+
   // Retry/backoff and lifecycle guards
   const retryAttemptRef = useRef(0);
   const backoffTimerRef = useRef<number | null>(null);
@@ -59,6 +62,18 @@ export default function EditorLayout() {
     return updatedAt;
   };
 
+  // Local-first hydrate: pick last selected doc immediately (before Convex responds)
+  useEffect(() => {
+    if (selectedId) return;
+    try {
+      const last = localStorage.getItem(LAST_DOC_KEY);
+      if (last) {
+        setSelectedId(last as Id<"documents">);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // load the selected document (returns null while not selected)
   // When no document is selected pass the "skip" sentinel so the hook doesn't run.
   const selectedDoc = useQuery(
@@ -68,10 +83,6 @@ export default function EditorLayout() {
 
   // Track if we're in the middle of a document switch to avoid conflicts
   const documentSwitchingRef = useRef<boolean>(false);
-
-  // (moved) Reconciliation effect is defined after saveHandle
-
-  // (moved) Multi-tab storage sync effect is defined after saveHandle
 
   // list user's documents to auto-select or create a new one if needed
   const docs = useQuery(api.documents.listDocumentsForUser, {}) as Array<{
@@ -107,9 +118,13 @@ export default function EditorLayout() {
     }
   }, [selectedId, lastSyncedContent]);
 
+  // Guard: only sync when we have the server doc loaded for the selected id
+  const canSync = !!(selectedId && selectedDoc && selectedDoc._id === selectedId);
+
   // Debounced save function with backoff + lifecycle guards
   const saveHandle = useDebouncedCallback(async (newValue: string) => {
     if (!selectedId) return;
+    if (!canSync) return; // wait for Convex to load the document before saving
 
     // Cancel any scheduled backoff retry before a fresh save
     if (backoffTimerRef.current) {
@@ -250,25 +265,34 @@ export default function EditorLayout() {
       setSyncStatus("local");
     }
 
-    // Debounced save to server
-    saveHandle.call(newValue);
+    // Debounced save to server (only if we can sync)
+    if (canSync) {
+      saveHandle.call(newValue);
+    }
   };
 
+  // When Convex docs load, validate the preloaded selectedId.
   useEffect(() => {
-    // If there's already a selected document, do nothing.
-    if (selectedId) return;
-    // Wait until docs are loaded (docs can be undefined while loading).
     if (!docs) return;
 
-    // If user has existing documents, select the first one.
+    // If there's already a selected document and it's valid, keep it.
+    if (selectedId && docs.some((d) => d._id === selectedId)) {
+      return;
+    }
+
+    // If no valid selection, choose the first existing doc.
     if (docs.length > 0) {
-      setSelectedId(docs[0]._id);
+      const firstId = docs[0]._id;
+      setSelectedId(firstId);
+      try {
+        localStorage.setItem(LAST_DOC_KEY, firstId as unknown as string);
+      } catch {}
       documentSwitchingRef.current = true;
       return;
     }
 
     // If user is signed in and has no documents, create a new default document once.
-    if (isSignedIn && !creatingRef.current) {
+    if (!selectedId && isSignedIn && !creatingRef.current) {
       creatingRef.current = true;
       (async () => {
         try {
@@ -281,6 +305,9 @@ export default function EditorLayout() {
           if (id) {
             const casted = id as Id<"documents">;
             setSelectedId(casted);
+            try {
+              localStorage.setItem(LAST_DOC_KEY, casted as unknown as string);
+            } catch {}
             documentSwitchingRef.current = true;
 
             // Persist default CSS to localStorage for this document (per-document key).
@@ -326,6 +353,9 @@ export default function EditorLayout() {
           }
           documentSwitchingRef.current = true;
           setSelectedId(id);
+          try {
+            localStorage.setItem(LAST_DOC_KEY, id as unknown as string);
+          } catch {}
           // popover closes itself via onClose
         }}
       />
