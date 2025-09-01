@@ -10,16 +10,19 @@ import StyleToolbarButton from "@/components/ui/style-toolbar-button";
 import GalleryToolbarButton from "@/components/ui/gallery-toolbar-button";
 import type { Id } from "../convex/_generated/dataModel";
 import DocumentsToolbarButton from "@/components/ui/documents-toolbar-button";
+import WritingAssistantToolbarButton from "./ui/writing-assistant-toolbar-button";
 
 export default function Toolbar({
   syncStatus = "synced",
   documentId,
   cssContent,
+  markdownContent,
   onSelectDocument,
 }: {
   syncStatus?: "local" | "synced";
   documentId?: Id<"documents"> | null;
   cssContent?: string | null;
+  markdownContent?: string | null;
   onSelectDocument: (id: Id<"documents">) => void;
 }) {
   const [exportOpen, setExportOpen] = useState(false);
@@ -55,6 +58,7 @@ export default function Toolbar({
         />
         <StyleToolbarButton documentId={documentId} cssContent={cssContent} />
         <GalleryToolbarButton />
+        <WritingAssistantToolbarButton />
       </div>
 
       <div className="flex items-center gap-2">
