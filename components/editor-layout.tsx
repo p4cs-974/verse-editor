@@ -119,7 +119,11 @@ export default function EditorLayout() {
   }, [selectedId, lastSyncedContent]);
 
   // Guard: only sync when we have the server doc loaded for the selected id
-  const canSync = !!(selectedId && selectedDoc && selectedDoc._id === selectedId);
+  const canSync = !!(
+    selectedId &&
+    selectedDoc &&
+    selectedDoc._id === selectedId
+  );
 
   // Debounced save function with backoff + lifecycle guards
   const saveHandle = useDebouncedCallback(async (newValue: string) => {
@@ -343,6 +347,7 @@ export default function EditorLayout() {
       <Toolbar
         documentId={selectedId}
         cssContent={selectedDoc?.cssContent ?? null}
+        markdownContent={selectedDoc?.markdownContent ?? null}
         syncStatus={syncStatus}
         onSelectDocument={(id) => {
           // Cancel any pending save for current doc before switching
