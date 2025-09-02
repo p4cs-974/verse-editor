@@ -30,14 +30,14 @@ export default function EditorPanel({
         <h2 className="text-lg font-semibold">{doc?.title ?? "Untitled"}</h2>
       </div>
 
-      <div className="p-4 h-[calc(100%-4rem)]">
+      <div className="p-4 h-full">
         <CodeMirror
           value={content}
           extensions={[markdown({ base: markdownLanguage })]}
           theme={"dark"}
           onChange={onChange}
           onBlur={() => onBlur?.()}
-          height="100%"
+          height="770px"
         />
       </div>
     </div>

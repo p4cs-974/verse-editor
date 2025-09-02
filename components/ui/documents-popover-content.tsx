@@ -7,6 +7,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { DEFAULT_DOCUMENT_CSS } from "@/lib/default-document-styles";
 import { Button } from "./button";
+import { threadId } from "worker_threads";
 
 export default function DocumentsPopoverContent({
   selectedId,
@@ -23,6 +24,7 @@ export default function DocumentsPopoverContent({
   }> | null;
   const create = useMutation(api.documents.createDocument);
   const remove = useMutation(api.documents.deleteDocument);
+  const createMarkdownThread = useMutation(api.chat.createMarkdownThread);
   const updateDoc = useMutation(api.documents.updateDocument);
   const { isSignedIn, getToken } = useAuth();
 
@@ -37,6 +39,7 @@ export default function DocumentsPopoverContent({
       return;
     }
     try {
+      const threadId = await createMarkdownThread();
       const token = await getToken().catch(() => null);
       console.debug("Attempting to create document; token present:", !!token);
 
@@ -44,6 +47,7 @@ export default function DocumentsPopoverContent({
         title,
         markdownContent: `# ${title}\n\n`,
         cssContent: DEFAULT_DOCUMENT_CSS,
+        threadId: threadId,
       });
       setCreatingTitle("");
       if (id) {

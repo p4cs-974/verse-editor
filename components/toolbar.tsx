@@ -18,12 +18,14 @@ export default function Toolbar({
   cssContent,
   markdownContent,
   onSelectDocument,
+  markdownThreadId,
 }: {
   syncStatus?: "local" | "synced";
   documentId?: Id<"documents"> | null;
   cssContent?: string | null;
   markdownContent?: string | null;
   onSelectDocument: (id: Id<"documents">) => void;
+  markdownThreadId: string;
 }) {
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -58,7 +60,7 @@ export default function Toolbar({
         />
         <StyleToolbarButton documentId={documentId} cssContent={cssContent} />
         <GalleryToolbarButton />
-        <WritingAssistantToolbarButton />
+        <WritingAssistantToolbarButton markdownThreadId={markdownThreadId} />
       </div>
 
       <div className="flex items-center gap-2">

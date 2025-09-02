@@ -24,6 +24,7 @@ export default function DocumentsSidebar({
   }> | null;
   const create = useMutation(api.documents.createDocument);
   const remove = useMutation(api.documents.deleteDocument);
+  const createMarkdownThread = useMutation(api.chat.createMarkdownThread);
   const updateDoc = useMutation(api.documents.updateDocument);
   // Clerk auth helpers (used to guard create/delete operations and to diagnose token issues)
   const { isSignedIn, getToken } = useAuth();
@@ -44,11 +45,13 @@ export default function DocumentsSidebar({
       // Try to obtain a Clerk token (for debugging if auth isn't being forwarded to Convex).
       const token = await getToken().catch(() => null);
       console.debug("Attempting to create document; token present:", !!token);
+      const threadId = await createMarkdownThread();
 
       const id = await create({
         title,
         markdownContent: `# ${title}\n\n`,
         cssContent: DEFAULT_DOCUMENT_CSS,
+        threadId: threadId,
       });
       setCreatingTitle("");
       // select the newly created document

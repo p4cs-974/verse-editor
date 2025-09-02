@@ -21,7 +21,7 @@ import {
   PaginationNext,
 } from "./pagination";
 
-interface Props {
+interface PopoverContentProps {
   threadId: string;
 }
 
@@ -72,6 +72,7 @@ function Message({ message }: { message: UIMessage }) {
   return (
     <CodeMirror
       value={editorValue}
+      height="372px"
       extensions={[markdown(), EditorView.lineWrapping]}
       editable={false}
       theme={"dark"}
@@ -253,7 +254,9 @@ function Story({ threadId }: { threadId: string }) {
   );
 }
 
-export default function AssistantPopoverContent({ threadId }: Props) {
+export default function AssistantPopoverContent({
+  threadId,
+}: PopoverContentProps) {
   return (
     <div className="flex flex-col w-full">
       <main className="flex-1 w-full">

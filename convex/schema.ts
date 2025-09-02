@@ -8,6 +8,7 @@ export default defineSchema({
     markdownContent: v.string(),
     cssContent: v.optional(v.string()),
     ownerId: v.string(),
+    threadId: v.string(),
   }).index("by_ownerId", ["ownerId"]),
 
   // Images uploaded by Clerk users via UploadThing (ownerId is the Clerk user id as a string)

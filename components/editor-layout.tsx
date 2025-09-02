@@ -10,7 +10,6 @@ import { DEFAULT_DOCUMENT_CSS } from "@/lib/default-document-styles";
 import Toolbar from "./toolbar";
 import EditorPanel from "./editor-panel";
 import PreviewPanel from "./preview-panel";
-
 /**
  * EditorLayout — composes toolbar, optional documents sidebar, editor and preview.
  * The documents sidebar is toggleable via the toolbar button.
@@ -91,6 +90,7 @@ export default function EditorLayout() {
   }> | null;
   const createDocument = useMutation(api.documents.createDocument);
   const updateDocument = useMutation(api.documents.updateDocument);
+  const createMarkdownThreadId = useMutation(api.chat.createMarkdownThread);
   const { isSignedIn } = useAuth();
 
   // persist current document css to localStorage whenever it changes
@@ -296,49 +296,54 @@ export default function EditorLayout() {
     }
 
     // If user is signed in and has no documents, create a new default document once.
-    if (!selectedId && isSignedIn && !creatingRef.current) {
-      creatingRef.current = true;
-      (async () => {
-        try {
-          const initial = "# Untitled\n\n";
-          const id = await createDocument({
-            title: "Untitled",
-            markdownContent: initial,
-            cssContent: DEFAULT_DOCUMENT_CSS,
-          });
-          if (id) {
-            const casted = id as Id<"documents">;
-            setSelectedId(casted);
-            try {
-              localStorage.setItem(LAST_DOC_KEY, casted as unknown as string);
-            } catch {}
-            documentSwitchingRef.current = true;
+    {
+      if (!selectedId && isSignedIn && !creatingRef.current) {
+        creatingRef.current = true;
+        (async () => {
+          try {
+            const initial = "# Untitled\n\n";
+            const threadId = await createMarkdownThreadId();
 
-            // Persist default CSS to localStorage for this document (per-document key).
-            // We store an empty map so the sidebar hydrates from cssContent on first open.
-            try {
-              localStorage.setItem(
-                `md-editor:user-css:${casted}`,
-                JSON.stringify({})
-              );
-              localStorage.setItem(
-                `md-editor:css-raw:${casted}`,
-                DEFAULT_DOCUMENT_CSS
-              );
-            } catch {}
+            const id = await createDocument({
+              title: "Untitled",
+              markdownContent: initial,
+              cssContent: DEFAULT_DOCUMENT_CSS,
+              threadId: threadId ? threadId : "",
+            });
+            if (id) {
+              const casted = id as Id<"documents">;
+              setSelectedId(casted);
+              try {
+                localStorage.setItem(LAST_DOC_KEY, casted as unknown as string);
+              } catch {}
+              documentSwitchingRef.current = true;
 
-            // Seed localStorage and local state
-            saveDraft(casted, initial);
-            setLocalContent(initial);
-            setLastSyncedContent(initial);
-            setSyncStatus("synced");
+              // Persist default CSS to localStorage for this document (per-document key).
+              // We store an empty map so the sidebar hydrates from cssContent on first open.
+              try {
+                localStorage.setItem(
+                  `md-editor:user-css:${casted}`,
+                  JSON.stringify({})
+                );
+                localStorage.setItem(
+                  `md-editor:css-raw:${casted}`,
+                  DEFAULT_DOCUMENT_CSS
+                );
+              } catch {}
+
+              // Seed localStorage and local state
+              saveDraft(casted, initial);
+              setLocalContent(initial);
+              setLastSyncedContent(initial);
+              setSyncStatus("synced");
+            }
+          } catch (err) {
+            console.error("Auto-create document failed", err);
+          } finally {
+            creatingRef.current = false;
           }
-        } catch (err) {
-          console.error("Auto-create document failed", err);
-        } finally {
-          creatingRef.current = false;
-        }
-      })();
+        })();
+      }
     }
   }, [docs, selectedId, isSignedIn, createDocument]);
 
@@ -349,6 +354,7 @@ export default function EditorLayout() {
         cssContent={selectedDoc?.cssContent ?? null}
         markdownContent={selectedDoc?.markdownContent ?? null}
         syncStatus={syncStatus}
+        markdownThreadId={selectedDoc?.threadId ? selectedDoc.threadId : ""}
         onSelectDocument={(id) => {
           // Cancel any pending save for current doc before switching
           saveHandle.cancel();

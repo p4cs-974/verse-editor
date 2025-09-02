@@ -1,5 +1,14 @@
-import { mutation, query } from "./_generated/server";
+import {
+  ActionCtx,
+  mutation,
+  MutationCtx,
+  query,
+  QueryCtx,
+} from "./_generated/server";
 import { v } from "convex/values";
+import { createMarkdownThread } from "./chat";
+import { GenericMutationCtx } from "convex/server";
+import { threadId } from "worker_threads";
 
 /**
  * Create a document owned by the authenticated Clerk user.
@@ -12,6 +21,7 @@ export const createDocument = mutation({
     title: v.string(),
     markdownContent: v.string(),
     cssContent: v.optional(v.string()),
+    threadId: v.string(),
   },
   returns: v.id("documents"),
   handler: async (ctx, args) => {
@@ -39,6 +49,7 @@ export const createDocument = mutation({
       cssContent:
         typeof args.cssContent === "undefined" ? undefined : args.cssContent,
       ownerId: userId,
+      threadId: args.threadId,
     });
   },
 });
@@ -56,6 +67,7 @@ export const listDocumentsForUser = query({
       markdownContent: v.string(),
       cssContent: v.optional(v.string()),
       ownerId: v.string(),
+      threadId: v.string(),
     })
   ),
   handler: async (ctx, _args) => {
@@ -91,6 +103,7 @@ export const getDocument = query({
       markdownContent: v.string(),
       cssContent: v.optional(v.string()),
       ownerId: v.string(),
+      threadId: v.string(),
     })
   ),
   handler: async (ctx, args) => {
@@ -157,5 +170,19 @@ export const deleteDocument = mutation({
     }
     await ctx.db.delete(args.documentId);
     return null;
+  },
+});
+
+export const resetDocumentThread = mutation({
+  args: { documentId: v.id("documents"), newThreadId: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.documentId);
+    if (!doc) throw new Error("Document not found");
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity?.subject;
+    if (!userId || doc.ownerId !== userId) {
+      throw new Error("Not authorized to delete this document");
+    }
+    await ctx.db.patch(args.documentId, { threadId: args.newThreadId });
   },
 });

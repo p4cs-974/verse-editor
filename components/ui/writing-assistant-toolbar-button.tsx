@@ -12,12 +12,14 @@ interface WritingAssistantToolbarButtonProps {
   className?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  markdownThreadId: string;
 }
 
 export default function WritingAssistantToolbarButton({
   className,
   open: controlledOpen,
   onOpenChange,
+  markdownThreadId,
 }: WritingAssistantToolbarButtonProps) {
   const id = useId();
   const popoverId = `assistant-popover-${id}`;
@@ -36,15 +38,15 @@ export default function WritingAssistantToolbarButton({
       setOpen(true);
     }
   }
-  const [threadId, setThreadId] = React.useState<string | null>(null);
+  // const [threadId, setThreadId] = React.useState<string | null>(null);
 
-  const createMarkdownThread = useMutation(api.chat.createMarkdownThread);
+  // const createMarkdownThread = useMutation(api.chat.createMarkdownThread);
+  //   useEffect(() => {
 
-  useEffect(() => {
-    createMarkdownThread()
-      .then(setThreadId)
-      .catch((err) => setThreadId(null));
-  }, []);
+  //   createMarkdownThread()
+  //   .then(setThreadId)
+  //   .catch((err) => setThreadId(null));
+  // }, []);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -58,7 +60,7 @@ export default function WritingAssistantToolbarButton({
         <ToolbarButton
           ref={buttonRef}
           icon={Sparkles}
-          label="assistant"
+          label="Assistant"
           ariaLabel="assistant"
           className={className}
         />
@@ -72,12 +74,12 @@ export default function WritingAssistantToolbarButton({
         align="center"
         className="w-auto p-0"
       >
-        {threadId && (
-          <AssistantPopoverView
-            threadId={threadId}
-            onClose={() => setOpen(false)}
-          />
-        )}
+        {/* {threadId && ( */}
+        <AssistantPopoverView
+          threadId={markdownThreadId}
+          onClose={() => setOpen(false)}
+        />
+        {/* )} */}
       </PopoverContent>
     </Popover>
   );
