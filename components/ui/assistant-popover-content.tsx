@@ -1,6 +1,6 @@
 import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Textarea } from "./textarea";
 import { Button } from "./button";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
@@ -20,6 +20,7 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from "./pagination";
+import { File } from "lucide-react";
 
 // Simple per-page in-memory cache for thread results. Bounded to avoid unbounded growth.
 // This cache is intentionally simple; it persists to localStorage to survive reloads.
@@ -188,6 +189,16 @@ function Story({ threadId }: { threadId: string }) {
     optimisticallySendMessage(api.chat.listMarkdownThreadMessages)
   );
   const [prompt, setPrompt] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Convert server results into UI messages and only keep assistant messages
   const rawResults = messages.results ?? [];
@@ -293,29 +304,55 @@ function Story({ threadId }: { threadId: string }) {
           <div className="mt-2 flex items-center justify-between gap-2 w-full">
             <div>
               {assistantMessages.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={async () => {
-                    try {
-                      const text = assistantMessages[currentIndex]?.text ?? "";
-                      await navigator.clipboard.writeText(text);
-                    } catch (err) {
-                      // eslint-disable-next-line no-console
-                      console.error("Copy failed", err);
-                    }
-                  }}
-                  aria-label="Copy current assistant message"
-                >
-                  Copy
-                </Button>
+                <div className="relative inline-block">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const text =
+                          assistantMessages[currentIndex]?.text ?? "";
+                        await navigator.clipboard.writeText(text);
+                        setCopied(true);
+                        if (copyTimeoutRef.current) {
+                          window.clearTimeout(copyTimeoutRef.current);
+                        }
+                        copyTimeoutRef.current = window.setTimeout(() => {
+                          setCopied(false);
+                        }, 1200);
+                      } catch (err) {
+                        // eslint-disable-next-line no-console
+                        console.error("Copy failed", err);
+                      }
+                    }}
+                    aria-label="Copy current assistant message"
+                    className="underline"
+                  >
+                    <File />
+                    Copy
+                  </Button>
+
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className={`absolute -top-6 left-1/2 transform -translate-x-1/2 bg-neutral-800 text-white text-xs px-2 py-1 rounded shadow pointer-events-none transition-opacity duration-200 ${
+                      copied ? "opacity-100" : "opacity-0"
+                    }`}
+                  >
+                    Copied!
+                  </span>
+                </div>
               ) : (
                 <div className="w-12" />
               )}
             </div>
 
             <div>
-              <Button type="submit" disabled={!prompt?.trim()}>
+              <Button
+                type="submit"
+                disabled={!prompt?.trim()}
+                className="font-medium"
+              >
                 Send
               </Button>
             </div>
