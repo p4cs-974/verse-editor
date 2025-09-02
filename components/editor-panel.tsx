@@ -1,5 +1,5 @@
 "use client";
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 // import { languages } from "@codemirror/language-data";
 import type { Id } from "../convex/_generated/dataModel";
@@ -33,7 +33,10 @@ export default function EditorPanel({
       <div className="p-4 h-full">
         <CodeMirror
           value={content}
-          extensions={[markdown({ base: markdownLanguage })]}
+          extensions={[
+            markdown({ base: markdownLanguage }),
+            EditorView.lineWrapping,
+          ]}
           theme={"dark"}
           onChange={onChange}
           onBlur={() => onBlur?.()}

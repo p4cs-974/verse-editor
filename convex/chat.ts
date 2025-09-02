@@ -93,12 +93,11 @@ export const streamMarkdown = internalAction({
   args: { promptMessageId: v.string(), threadId: v.string() },
   handler: async (ctx, { promptMessageId, threadId }) => {
     const { thread } = await markdownAgent.continueThread(ctx, { threadId });
-    // Ensure stream deltas are saved with word-level chunking so the client
-    // receives incremental updates. Previously this used `saveStreamDeltas: true`
-    // which may persist only the final text in some runtimes.
+
     const result = await thread.streamText(
       { promptMessageId },
-      { saveStreamDeltas: { chunking: "word" } }
+      { saveStreamDeltas: true }
+      // { saveStreamDeltas: { chunking: "word" } }
     );
     await result.consumeStream();
   },
@@ -111,9 +110,6 @@ export const listMarkdownThreadMessages = query({
     streamArgs: vStreamArgs,
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    const userId = identity?.subject;
-
     try {
       await authorizeThreadAccess(ctx, args.threadId);
     } catch (err) {
