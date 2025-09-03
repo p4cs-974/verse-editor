@@ -1,10 +1,16 @@
 import { components, internal } from "./_generated/api";
-import { Agent, vStreamArgs } from "@convex-dev/agent";
+import {
+  Agent,
+  UsageHandler,
+  vProviderMetadata,
+  vStreamArgs,
+} from "@convex-dev/agent";
 import { groq } from "@ai-sdk/groq";
 import {
   action,
   ActionCtx,
   internalAction,
+  internalMutation,
   mutation,
   MutationCtx,
   query,
@@ -28,15 +34,85 @@ Output only the final content with no explanations.
 - If user sends a vague prompt (i.e. "write something about X"), be concise.
 - When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)`;
 
+// export const usageHandler: UsageHandler = async (ctx, args) => {
+//   if (!args.userId) {
+//     console.debug("Not tracking anonymous usage");
+//   }
+
+//   // const completionTokens = args.usage.outputTokens;
+//   // args.usage.completionTokens = completionTokens;
+
+//   await ctx.runMutation(internal.chat.insertRawUsage, {
+//     userId: args.userId,
+//     agentName: args.agentName,
+//     model: args.model,
+//     provider: args.provider,
+//     usage: args.usage,
+//     providerMetadata: args.providerMetadata,
+//   });
+// };
+
 const markdownAgent = new Agent(components.agent, {
   name: "markdown-agent",
   languageModel: groq.languageModel("openai/gpt-oss-120b"),
   tools: {
     browser_search: groq.tools.browserSearch({}),
   },
+  usageHandler: async (ctx, args) => {
+    const {
+      userId,
+      threadId,
+      agentName,
 
+      model,
+      provider,
+
+      usage,
+      providerMetadata,
+    } = args;
+    await ctx.runMutation(internal.chat.insertRawUsage, {
+      userId,
+      threadId,
+      agentName,
+      model,
+      provider,
+      usage,
+      providerMetadata,
+    });
+  },
   instructions: DEFAULT_MARKDOWN_INSTRUCTIONS,
 });
+
+export const insertRawUsage = internalMutation({
+  args: {
+    userId: v.string(),
+    threadId: v.string(),
+    agentName: v.optional(v.string()),
+    model: v.string(),
+    provider: v.string(),
+    usage: v.object({
+      cachedInputTokens: v.optional(v.number()),
+      inputTokens: v.number(),
+      outputTokens: v.number(),
+      reasoningTokens: v.optional(v.number()),
+      totalTokens: v.number(),
+    }),
+    providerMetadata: v.optional(vProviderMetadata),
+  },
+  handler: async (ctx, args) => {
+    const billingPeriod = getBillingPeriod(Date.now());
+    return await ctx.db.insert("rawUsage", {
+      ...args,
+      billingPeriod,
+    });
+  },
+});
+
+function getBillingPeriod(at: number) {
+  const now = new Date(at);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth());
+  return startOfMonth.toISOString().split("T")[0];
+}
 
 export const createMarkdownThread = mutation({
   args: {},
@@ -85,6 +161,9 @@ export const sendWritingPrompt = action({
       { saveStreamDeltas: { chunking: "word" } }
     );
 
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity?.subject;
+
     await result.consumeStream();
   },
 });
@@ -99,6 +178,7 @@ export const streamMarkdown = internalAction({
       { saveStreamDeltas: true }
       // { saveStreamDeltas: { chunking: "word" } }
     );
+
     await result.consumeStream();
   },
 });
