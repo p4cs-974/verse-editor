@@ -168,8 +168,10 @@ export const insertRawUsage = internalMutation({
 });
 function getBillingPeriod(at: number) {
   const now = new Date(at);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth());
-  return startOfMonth.toISOString().split("T")[0];
+  const startOfMonthUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  return startOfMonthUtc.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 export const createMarkdownThread = mutation({
