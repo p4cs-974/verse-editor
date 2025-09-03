@@ -123,6 +123,14 @@ export const insertRawUsage = internalMutation({
   },
 });
 
+/**
+ * Compute the billing period start date for a given timestamp.
+ *
+ * Returns the ISO date (YYYY-MM-DD) representing the first day of the month that contains the provided timestamp.
+ *
+ * @param at - Unix timestamp in milliseconds
+ * @returns The start-of-month date as an ISO date string (e.g., `2025-09-01`)
+ */
 function getBillingPeriod(at: number) {
   const now = new Date(at);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth());
