@@ -1,7 +1,46 @@
+import { vProviderMetadata, vUsage } from "@convex-dev/agent";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  rawUsage: defineTable({
+    userId: v.string(),
+    threadId: v.string(),
+    agentName: v.optional(v.string()),
+    model: v.string(),
+    provider: v.string(),
+
+    // stats
+    usage: v.object({
+      cachedInputTokens: v.optional(v.number()),
+      inputTokens: v.number(),
+      outputTokens: v.number(),
+      reasoningTokens: v.optional(v.number()),
+      totalTokens: v.number(),
+    }),
+    providerMetadata: v.optional(vProviderMetadata),
+    idempotencyKey: v.optional(v.string()),
+
+    // In this case, we're setting it to the first day of the current month,
+    // using UTC time for the month boundaries.
+    // You could alternatively store it as a timestamp number.
+    // You can then fetch all the usage at the end of the billing period
+    // and calculate the total cost.
+    billingPeriod: v.string(), // When the usage period ended
+  }).index("billingPeriod_userId", ["billingPeriod", "userId"]),
+  .index("by_idempotencyKey", ["idempotencyKey"]),
+
+  invoices: defineTable({
+    userId: v.string(),
+    billingPeriod: v.string(),
+    amount: v.number(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed")
+    ),
+  }).index("billingPeriod_userId", ["billingPeriod", "userId"]),
+
   // Documents owned by Clerk users (ownerId is the Clerk user id as a string)
   documents: defineTable({
     title: v.string(),

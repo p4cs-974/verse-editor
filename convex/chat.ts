@@ -1,10 +1,16 @@
 import { components, internal } from "./_generated/api";
-import { Agent, vStreamArgs } from "@convex-dev/agent";
+import {
+  Agent,
+  UsageHandler,
+  vProviderMetadata,
+  vStreamArgs,
+} from "@convex-dev/agent";
 import { groq } from "@ai-sdk/groq";
 import {
   action,
   ActionCtx,
   internalAction,
+  internalMutation,
   mutation,
   MutationCtx,
   query,
@@ -28,15 +34,145 @@ Output only the final content with no explanations.
 - If user sends a vague prompt (i.e. "write something about X"), be concise.
 - When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)`;
 
+// export const usageHandler: UsageHandler = async (ctx, args) => {
+//   if (!args.userId) {
+//     console.debug("Not tracking anonymous usage");
+//   }
+
+//   // const completionTokens = args.usage.outputTokens;
+//   // args.usage.completionTokens = completionTokens;
+
+//   await ctx.runMutation(internal.chat.insertRawUsage, {
+//     userId: args.userId,
+//     agentName: args.agentName,
+//     model: args.model,
+//     provider: args.provider,
+//     usage: args.usage,
+//     providerMetadata: args.providerMetadata,
+//   });
+// };
+
 const markdownAgent = new Agent(components.agent, {
   name: "markdown-agent",
   languageModel: groq.languageModel("openai/gpt-oss-120b"),
   tools: {
     browser_search: groq.tools.browserSearch({}),
   },
+  usageHandler: async (ctx, args) => {
+    const {
+      userId,
+      threadId,
+      agentName,
+      model,
+      provider,
+      usage,
+      providerMetadata,
+    } = args;
 
+    // Skip tracking for anonymous users
+    if (!userId) {
+      console.debug("Skipping usage tracking for anonymous user");
+      return;
+    }
+    // Defensive: ensure threadId is present
+    if (!threadId) {
+      console.warn("Skipping usage tracking: missing threadId");
+      return;
+    }
+
+    try {
+      await ctx.runMutation(internal.chat.insertRawUsage, {
+        userId,
+        threadId,
+        agentName,
+        model,
+        provider,
+        usage,
+        providerMetadata,
+        idempotencyKey:
+          providerMetadata?.requestId ??
+          `${threadId}:${provider}:${model}:${usage.totalTokens}`,
+      });
+    } catch (error) {
+      // Log error but don't fail the main operation
+      console.error("Failed to track usage:", error);
+    }
+  },
   instructions: DEFAULT_MARKDOWN_INSTRUCTIONS,
 });
+
+export const insertRawUsage = internalMutation({
+  args: {
+    userId: v.string(),
+    threadId: v.string(),
+    agentName: v.optional(v.string()),
+    model: v.string(),
+    provider: v.string(),
+    usage: v.object({
+      cachedInputTokens: v.optional(v.number()),
+      inputTokens: v.number(),
+      outputTokens: v.number(),
+      reasoningTokens: v.optional(v.number()),
+      totalTokens: v.number(),
+    }),
+    providerMetadata: v.optional(vProviderMetadata),
+    idempotencyKey: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // 1) Authorize association (defense-in-depth; internal-only but cheap)
+    const meta = await markdownAgent.getThreadMetadata(ctx, {
+      threadId: args.threadId,
+    });
+    if (meta.userId !== args.userId) {
+      throw new Error("User/thread mismatch for usage event");
+    }
+
+    // 2) Dedupe
+    if (args.idempotencyKey) {
+      const dup = await ctx.db
+        .query("rawUsage")
+        .withIndex("by_idempotencyKey", (q) =>
+          q.eq("idempotencyKey", args.idempotencyKey!)
+        )
+        .unique();
+      if (dup) return dup._id;
+    }
+
+    // 3) Invariants
+    const u = args.usage;
+    const fields = ["inputTokens", "outputTokens", "reasoningTokens", "cachedInputTokens"] as const;
+    for (const k of fields) {
+      const v = u[k];
+      if (v !== undefined && (v < 0 || !Number.isFinite(v))) {
+        throw new Error(`Invalid token count for ${k}`);
+      }
+    }
+    const expectedTotal =
+      (u.inputTokens ?? 0) +
+      (u.outputTokens ?? 0) +
+      (u.reasoningTokens ?? 0) +
+      (u.cachedInputTokens ?? 0);
+    const totalTokens =
+      Number.isFinite(u.totalTokens) && u.totalTokens >= expectedTotal
+        ? u.totalTokens
+        : expectedTotal;
+
+    // 4) Persist
+    const billingPeriod = getBillingPeriod(Date.now());
+    return await ctx.db.insert("rawUsage", {
+      ...args,
+      usage: { ...u, totalTokens },
+      billingPeriod,
+    });
+  },
+});
+function getBillingPeriod(at: number) {
+  const now = new Date(at);
+  const startOfMonthUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  return startOfMonthUtc.toISOString().slice(0, 10); // YYYY-MM-DD
+}
 
 export const createMarkdownThread = mutation({
   args: {},
@@ -99,6 +235,7 @@ export const streamMarkdown = internalAction({
       { saveStreamDeltas: true }
       // { saveStreamDeltas: { chunking: "word" } }
     );
+
     await result.consumeStream();
   },
 });
