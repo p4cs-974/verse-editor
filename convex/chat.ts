@@ -89,6 +89,9 @@ const markdownAgent = new Agent(components.agent, {
         provider,
         usage,
         providerMetadata,
+        idempotencyKey:
+          providerMetadata?.requestId ??
+          `${threadId}:${provider}:${model}:${usage.totalTokens}`,
       });
     } catch (error) {
       // Log error but don't fail the main operation
@@ -113,11 +116,52 @@ export const insertRawUsage = internalMutation({
       totalTokens: v.number(),
     }),
     providerMetadata: v.optional(vProviderMetadata),
+    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // 1) Authorize association (defense-in-depth; internal-only but cheap)
+    const meta = await markdownAgent.getThreadMetadata(ctx, {
+      threadId: args.threadId,
+    });
+    if (meta.userId !== args.userId) {
+      throw new Error("User/thread mismatch for usage event");
+    }
+
+    // 2) Dedupe
+    if (args.idempotencyKey) {
+      const dup = await ctx.db
+        .query("rawUsage")
+        .withIndex("by_idempotencyKey", (q) =>
+          q.eq("idempotencyKey", args.idempotencyKey!)
+        )
+        .unique();
+      if (dup) return dup._id;
+    }
+
+    // 3) Invariants
+    const u = args.usage;
+    const fields = ["inputTokens", "outputTokens", "reasoningTokens", "cachedInputTokens"] as const;
+    for (const k of fields) {
+      const v = u[k];
+      if (v !== undefined && (v < 0 || !Number.isFinite(v))) {
+        throw new Error(`Invalid token count for ${k}`);
+      }
+    }
+    const expectedTotal =
+      (u.inputTokens ?? 0) +
+      (u.outputTokens ?? 0) +
+      (u.reasoningTokens ?? 0) +
+      (u.cachedInputTokens ?? 0);
+    const totalTokens =
+      Number.isFinite(u.totalTokens) && u.totalTokens >= expectedTotal
+        ? u.totalTokens
+        : expectedTotal;
+
+    // 4) Persist
     const billingPeriod = getBillingPeriod(Date.now());
     return await ctx.db.insert("rawUsage", {
       ...args,
+      usage: { ...u, totalTokens },
       billingPeriod,
     });
   },
@@ -131,10 +175,14 @@ export const insertRawUsage = internalMutation({
  * @param at - Unix timestamp in milliseconds
  * @returns The start-of-month date as an ISO date string (e.g., `2025-09-01`)
  */
+
+
 function getBillingPeriod(at: number) {
   const now = new Date(at);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth());
-  return startOfMonth.toISOString().split("T")[0];
+  const startOfMonthUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  return startOfMonthUtc.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 export const createMarkdownThread = mutation({
