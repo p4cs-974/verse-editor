@@ -63,22 +63,37 @@ const markdownAgent = new Agent(components.agent, {
       userId,
       threadId,
       agentName,
-
       model,
       provider,
-
       usage,
       providerMetadata,
     } = args;
-    await ctx.runMutation(internal.chat.insertRawUsage, {
-      userId,
-      threadId,
-      agentName,
-      model,
-      provider,
-      usage,
-      providerMetadata,
-    });
+
+    // Skip tracking for anonymous users
+    if (!userId) {
+      console.debug("Skipping usage tracking for anonymous user");
+      return;
+    }
+    // Defensive: ensure threadId is present
+    if (!threadId) {
+      console.warn("Skipping usage tracking: missing threadId");
+      return;
+    }
+
+    try {
+      await ctx.runMutation(internal.chat.insertRawUsage, {
+        userId,
+        threadId,
+        agentName,
+        model,
+        provider,
+        usage,
+        providerMetadata,
+      });
+    } catch (error) {
+      // Log error but don't fail the main operation
+      console.error("Failed to track usage:", error);
+    }
   },
   instructions: DEFAULT_MARKDOWN_INSTRUCTIONS,
 });
@@ -160,9 +175,6 @@ export const sendWritingPrompt = action({
       { prompt: args.prompt },
       { saveStreamDeltas: { chunking: "word" } }
     );
-
-    const identity = await ctx.auth.getUserIdentity();
-    const userId = identity?.subject;
 
     await result.consumeStream();
   },
