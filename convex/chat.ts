@@ -90,8 +90,8 @@ const markdownAgent = new Agent(components.agent, {
         usage,
         providerMetadata,
         idempotencyKey:
-          providerMetadata?.requestId ??
-          `${threadId}:${provider}:${model}:${usage.totalTokens}`,
+          // providerMetadata?.requestId ??
+          `${threadId}:${provider}:${model}:${Date.now()}:${Math.random()}`,
       });
     } catch (error) {
       // Log error but don't fail the main operation
@@ -110,10 +110,10 @@ export const insertRawUsage = internalMutation({
     provider: v.string(),
     usage: v.object({
       cachedInputTokens: v.optional(v.number()),
-      inputTokens: v.number(),
-      outputTokens: v.number(),
+      inputTokens: v.optional(v.number()),
+      outputTokens: v.optional(v.number()),
       reasoningTokens: v.optional(v.number()),
-      totalTokens: v.number(),
+      totalTokens: v.optional(v.number()),
     }),
     providerMetadata: v.optional(vProviderMetadata),
     idempotencyKey: v.optional(v.string()),
@@ -140,7 +140,12 @@ export const insertRawUsage = internalMutation({
 
     // 3) Invariants
     const u = args.usage;
-    const fields = ["inputTokens", "outputTokens", "reasoningTokens", "cachedInputTokens"] as const;
+    const fields = [
+      "inputTokens",
+      "outputTokens",
+      "reasoningTokens",
+      "cachedInputTokens",
+    ] as const;
     for (const k of fields) {
       const v = u[k];
       if (v !== undefined && (v < 0 || !Number.isFinite(v))) {
@@ -152,10 +157,9 @@ export const insertRawUsage = internalMutation({
       (u.outputTokens ?? 0) +
       (u.reasoningTokens ?? 0) +
       (u.cachedInputTokens ?? 0);
-    const totalTokens =
-      Number.isFinite(u.totalTokens) && u.totalTokens >= expectedTotal
-        ? u.totalTokens
-        : expectedTotal;
+    const totalTokens = Number.isFinite(u.totalTokens)
+      ? u.totalTokens
+      : expectedTotal;
 
     // 4) Persist
     const billingPeriod = getBillingPeriod(Date.now());
@@ -175,7 +179,6 @@ export const insertRawUsage = internalMutation({
  * @param at - Unix timestamp in milliseconds
  * @returns The start-of-month date as an ISO date string (e.g., `2025-09-01`)
  */
-
 
 function getBillingPeriod(at: number) {
   const now = new Date(at);

@@ -13,10 +13,10 @@ export default defineSchema({
     // stats
     usage: v.object({
       cachedInputTokens: v.optional(v.number()),
-      inputTokens: v.number(),
-      outputTokens: v.number(),
+      inputTokens: v.optional(v.number()),
+      outputTokens: v.optional(v.number()),
       reasoningTokens: v.optional(v.number()),
-      totalTokens: v.number(),
+      totalTokens: v.optional(v.number()),
     }),
     providerMetadata: v.optional(vProviderMetadata),
     idempotencyKey: v.optional(v.string()),
@@ -27,8 +27,9 @@ export default defineSchema({
     // You can then fetch all the usage at the end of the billing period
     // and calculate the total cost.
     billingPeriod: v.string(), // When the usage period ended
-  }).index("billingPeriod_userId", ["billingPeriod", "userId"]),
-  .index("by_idempotencyKey", ["idempotencyKey"]),
+  })
+    .index("billingPeriod_userId", ["billingPeriod", "userId"])
+    .index("by_idempotencyKey", ["idempotencyKey"]),
 
   invoices: defineTable({
     userId: v.string(),
