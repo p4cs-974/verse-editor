@@ -169,7 +169,7 @@ export default function EditorLayout() {
         }, delay) as unknown as number;
       }
     }
-  }, 800);
+  }, 100);
 
   // lifecycle guard: mark mounted/unmounted and cleanup timers
   useEffect(() => {

@@ -125,11 +125,11 @@ function Message({ message }: { message: UIMessage }) {
 
   // Mirror displayedText into local editor state so CodeMirror receives an updated
   // controlled value as streaming updates arrive.
-  const [editorValue, setEditorValue] = React.useState(visibleText);
+  // const [setEditorValue] = React.useState(visibleText);
 
-  React.useEffect(() => {
-    setEditorValue(visibleText);
-  }, [visibleText]);
+  // React.useEffect(() => {
+  //   setEditorValue(visibleText);
+  // }, [visibleText]);
 
   if (!isAssistantMsg) return null;
 
