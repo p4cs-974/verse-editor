@@ -116,16 +116,56 @@ export const insertRawUsage = internalMutation({
       totalTokens: v.number(),
     }),
     providerMetadata: v.optional(vProviderMetadata),
+    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // 1) Authorize association (defense-in-depth; internal-only but cheap)
+    const meta = await markdownAgent.getThreadMetadata(ctx, {
+      threadId: args.threadId,
+    });
+    if (meta.userId !== args.userId) {
+      throw new Error("User/thread mismatch for usage event");
+    }
+
+    // 2) Dedupe
+    if (args.idempotencyKey) {
+      const dup = await ctx.db
+        .query("rawUsage")
+        .withIndex("by_idempotencyKey", (q) =>
+          q.eq("idempotencyKey", args.idempotencyKey!)
+        )
+        .unique();
+      if (dup) return dup._id;
+    }
+
+    // 3) Invariants
+    const u = args.usage;
+    const fields = ["inputTokens", "outputTokens", "reasoningTokens", "cachedInputTokens"] as const;
+    for (const k of fields) {
+      const v = u[k];
+      if (v !== undefined && (v < 0 || !Number.isFinite(v))) {
+        throw new Error(`Invalid token count for ${k}`);
+      }
+    }
+    const expectedTotal =
+      (u.inputTokens ?? 0) +
+      (u.outputTokens ?? 0) +
+      (u.reasoningTokens ?? 0) +
+      (u.cachedInputTokens ?? 0);
+    const totalTokens =
+      Number.isFinite(u.totalTokens) && u.totalTokens >= expectedTotal
+        ? u.totalTokens
+        : expectedTotal;
+
+    // 4) Persist
     const billingPeriod = getBillingPeriod(Date.now());
     return await ctx.db.insert("rawUsage", {
       ...args,
+      usage: { ...u, totalTokens },
       billingPeriod,
     });
   },
 });
-
 function getBillingPeriod(at: number) {
   const now = new Date(at);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth());
