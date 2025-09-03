@@ -19,6 +19,7 @@ export default defineSchema({
       totalTokens: v.number(),
     }),
     providerMetadata: v.optional(vProviderMetadata),
+    idempotencyKey: v.optional(v.string()),
 
     // In this case, we're setting it to the first day of the current month,
     // using UTC time for the month boundaries.
@@ -27,6 +28,7 @@ export default defineSchema({
     // and calculate the total cost.
     billingPeriod: v.string(), // When the usage period ended
   }).index("billingPeriod_userId", ["billingPeriod", "userId"]),
+  .index("by_idempotencyKey", ["idempotencyKey"]),
 
   invoices: defineTable({
     userId: v.string(),
