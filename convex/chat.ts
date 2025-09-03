@@ -89,6 +89,9 @@ const markdownAgent = new Agent(components.agent, {
         provider,
         usage,
         providerMetadata,
+        idempotencyKey:
+          providerMetadata?.requestId ??
+          `${threadId}:${provider}:${model}:${usage.totalTokens}`,
       });
     } catch (error) {
       // Log error but don't fail the main operation
