@@ -95,47 +95,25 @@ function Message({ message }: { message: UIMessage }) {
     startStreaming: message.status === "streaming",
   });
 
-  // Debugging: message streaming state
-  // eslint-disable-next-line no-console
-  // console.debug("[Assistant] Message debug", {
-  //   key: message.key,
-  //   role: message.role,
-  //   status: message.status,
-  //   textLength: message.text?.length ?? 0,
-  //   visibleLength: visibleText.length,
-  // });
-
   const isAssistantMsg = message.role === "assistant";
 
-  // Some streaming implementations place incremental text on message.parts
-  // as parts of type "text" with state "streaming". Prefer that when present.
-  // const streamingPart = message.parts?.find((p) => {
-  //   return p.type === "text" && (p as any).text && p.state === "streaming";
-  // });
-  // const streamingPartText = streamingPart
-  //   ? (streamingPart as any).text
-  //   : undefined;
-
-  // Determine which text to display: prefer streaming part, then the smooth
-  // visibleText, then the final message.text.
-  // const displayedText =
-  //   message.status === "streaming"
-  //     ? streamingPartText ?? visibleText ?? message.text ?? ""
-  //     : message.text ?? visibleText ?? "";
-
-  // Mirror displayedText into local editor state so CodeMirror receives an updated
-  // controlled value as streaming updates arrive.
-  // const [setEditorValue] = React.useState(visibleText);
-
-  // React.useEffect(() => {
-  //   setEditorValue(visibleText);
-  // }, [visibleText]);
+  const editorRef = React.useRef<EditorView | null>(null);
 
   if (!isAssistantMsg) return null;
+
+  React.useEffect(() => {
+    const view = editorRef.current;
+    if (!view) return;
+    const changes = { from: 0, to: view.state.doc.length, insert: visibleText };
+    view.dispatch(view.state.update({ changes }));
+  }, [visibleText]);
 
   return (
     // <p>{visibleText}</p>
     <CodeMirror
+      onCreateEditor={(view) => {
+        editorRef.current = view;
+      }}
       value={visibleText}
       height="372px"
       extensions={[markdown(), EditorView.lineWrapping]}
