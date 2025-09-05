@@ -8,8 +8,13 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
+import type * as balanceTest from "../balanceTest.js";
+import type * as billing from "../billing.js";
 import type * as chat from "../chat.js";
 import type * as documents from "../documents.js";
+import type * as http from "../http.js";
+import type * as stripe from "../stripe.js";
 import type * as userImages from "../userImages.js";
 import type * as userImagesActions from "../userImagesActions.js";
 
@@ -28,8 +33,13 @@ import type {
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
+  balanceTest: typeof balanceTest;
+  billing: typeof billing;
   chat: typeof chat;
   documents: typeof documents;
+  http: typeof http;
+  stripe: typeof stripe;
   userImages: typeof userImages;
   userImagesActions: typeof userImagesActions;
 }>;
