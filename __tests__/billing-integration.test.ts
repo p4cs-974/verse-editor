@@ -246,7 +246,7 @@ describe("Billing System Integration Tests", () => {
   });
 
   describe("Usage Charging", () => {
-    it("should calculate correct provider cost and fee (micro-cents, 14%)", () => {
+    it("should calculate correct provider cost and fee (micro-cents, 5%)", () => {
       const MICRO = 1_000_000;
 
       const computeProviderCostMicro = (
@@ -273,8 +273,8 @@ describe("Billing System Integration Tests", () => {
 
       // provider cost should be 2 cents -> 2 * MICRO
       expect(providerCostMicro).toBe(2 * MICRO);
-      // feeMicro expected: round_half_up(2 cents in micro * 14% )
-      expect(feeMicro).toBe(Math.floor((2 * MICRO * 1400 + 5_000) / 10_000));
+      // feeMicro expected: round_half_up(2 cents in micro * 5%)
+      expect(feeMicro).toBe(Math.floor((2 * MICRO * 500 + 5_000) / 10_000));
       expect(totalMicro).toBe(providerCostMicro + feeMicro);
     });
 
