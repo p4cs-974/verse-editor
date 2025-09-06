@@ -1,6 +1,4 @@
-import { cn } from "@/lib/utils";
-
-("use client");
+"use client";
 
 import { cn } from "@/lib/utils";
 
