@@ -21,6 +21,8 @@ import {
   PaginationNext,
 } from "./pagination";
 import { File } from "lucide-react";
+import { BalanceDisplay } from "./balance-display";
+import { AddBalanceButton } from "./add-balance-button";
 
 // Simple per-page in-memory cache for thread results. Bounded to avoid unbounded growth.
 // This cache is intentionally simple; it persists to localStorage to survive reloads.
@@ -396,6 +398,15 @@ export default function AssistantPopoverContent({
 }: PopoverContentProps) {
   return (
     <div className="flex flex-col w-full">
+      {/* Header with title, balance, and add balance button */}
+      <div className="flex items-center justify-between mb-4 pb-3 border-b">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold">Assistant</h3>
+          <BalanceDisplay />
+        </div>
+        <AddBalanceButton />
+      </div>
+
       <main className="flex-1 w-full">
         {threadId ? (
           <Story threadId={threadId} />

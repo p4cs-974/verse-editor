@@ -1,4 +1,4 @@
-import { components, internal } from "./_generated/api";
+import { components, internal, api } from "./_generated/api";
 import {
   Agent,
   UsageHandler,
@@ -11,6 +11,7 @@ import {
   ActionCtx,
   internalAction,
   internalMutation,
+  internalQuery,
   mutation,
   MutationCtx,
   query,
@@ -80,8 +81,16 @@ const markdownAgent = new Agent(components.agent, {
       return;
     }
 
+    // Deterministic, string idempotency key when provider gives one; fallback to a thread-scoped key.
+    const idempotencyKey =
+      typeof providerMetadata?.requestId === "string"
+        ? providerMetadata.requestId
+        : `${threadId}:${provider}:${model}:${Date.now()}:${Math.random()}`;
+
+    // 1) Persist raw usage (deduped by idempotencyKey) and capture the inserted rawUsage id.
+    let rawUsageId: any = null;
     try {
-      await ctx.runMutation(internal.chat.insertRawUsage, {
+      rawUsageId = await ctx.runMutation(internal.chat.insertRawUsage, {
         userId,
         threadId,
         agentName,
@@ -89,13 +98,49 @@ const markdownAgent = new Agent(components.agent, {
         provider,
         usage,
         providerMetadata,
-        idempotencyKey:
-          // providerMetadata?.requestId ??
-          `${threadId}:${provider}:${model}:${Date.now()}:${Math.random()}`,
+        idempotencyKey,
       });
     } catch (error) {
-      // Log error but don't fail the main operation
-      console.error("Failed to track usage:", error);
+      console.error("Failed to track usage (insertRawUsage):", error);
+    }
+
+    // 2) If token counts are available, schedule a server-side job to finalize billing.
+    try {
+      const u = usage as any;
+      const inputTokens = Number.isFinite(u?.inputTokens)
+        ? Number(u.inputTokens)
+        : undefined;
+      const outputTokens = Number.isFinite(u?.outputTokens)
+        ? Number(u.outputTokens)
+        : undefined;
+
+      // Only schedule finalization when we have token counts and a persisted rawUsage row.
+      if (
+        rawUsageId &&
+        (inputTokens !== undefined || outputTokens !== undefined)
+      ) {
+        try {
+          await ctx.runMutation(internal.chat.processRawUsage, {
+            rawUsageId: rawUsageId as any,
+          });
+        } catch (schedErr) {
+          console.error("Failed to schedule billing finalization:", schedErr);
+        }
+      } else {
+        console.debug(
+          "Skipping scheduling finalization (no tokens or no rawUsageId)",
+          {
+            threadId,
+            provider,
+            model,
+            inputTokens,
+            outputTokens,
+            rawUsageId,
+          }
+        );
+      }
+    } catch (error) {
+      console.error("Failed during billing scheduling step:", error);
     }
   },
   instructions: DEFAULT_MARKDOWN_INSTRUCTIONS,
@@ -118,6 +163,7 @@ export const insertRawUsage = internalMutation({
     providerMetadata: v.optional(vProviderMetadata),
     idempotencyKey: v.optional(v.string()),
   },
+  returns: v.id("rawUsage"),
   handler: async (ctx, args) => {
     // 1) Authorize association (defense-in-depth; internal-only but cheap)
     const meta = await markdownAgent.getThreadMetadata(ctx, {
@@ -127,7 +173,40 @@ export const insertRawUsage = internalMutation({
       throw new Error("User/thread mismatch for usage event");
     }
 
-    // 2) Dedupe
+    // Resolve or create a billing user document. We want rawUsage.userId to store the
+    // billing users document _id (not the external Clerk id). This ensures downstream
+    // processing can operate on the billing doc directly.
+    let billingUserId: string;
+    const existingBillingUser = await ctx.db
+      .query("users")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .unique();
+    if (existingBillingUser) {
+      billingUserId = existingBillingUser._id;
+    } else {
+      const now = Date.now();
+      billingUserId = await ctx.db.insert("users", {
+        userId: args.userId,
+        email: undefined,
+        name: undefined,
+        createdAt: now,
+        receivedSignupCredit: false,
+        firstPaidTopupApplied: false,
+        kycLevel: undefined,
+        status: "active",
+      });
+      // Create empty balance row so downstream processing can run safely.
+      await ctx.db.insert("balances", {
+        userId: billingUserId,
+        balanceMicroCents: 0,
+        reservedMicroCents: 0,
+        updatedAt: now,
+        version: 1,
+      });
+    }
+
+    // 2) Dedupe by idempotencyKey (still valid); existing rows (older format)
+    // may already exist with external userId, but idempotencyKey dedupe is global.
     if (args.idempotencyKey) {
       const dup = await ctx.db
         .query("rawUsage")
@@ -138,7 +217,7 @@ export const insertRawUsage = internalMutation({
       if (dup) return dup._id;
     }
 
-    // 3) Invariants
+    // 3) Invariants (validate token counts)
     const u = args.usage;
     const fields = [
       "inputTokens",
@@ -161,11 +240,17 @@ export const insertRawUsage = internalMutation({
       ? u.totalTokens
       : expectedTotal;
 
-    // 4) Persist
+    // 4) Persist raw usage record using the billing user document id.
     const billingPeriod = getBillingPeriod(Date.now());
     return await ctx.db.insert("rawUsage", {
-      ...args,
+      userId: billingUserId,
+      threadId: args.threadId,
+      agentName: args.agentName,
+      model: args.model,
+      provider: args.provider,
       usage: { ...u, totalTokens },
+      providerMetadata: args.providerMetadata,
+      idempotencyKey: args.idempotencyKey,
       billingPeriod,
     });
   },
@@ -338,6 +423,34 @@ export const streamMarkdownAsynchronously = mutation({
   args: { prompt: v.string(), threadId: v.string() },
   handler: async (ctx, { prompt, threadId }) => {
     await authorizeThreadAccess(ctx, threadId);
+
+    // Check if user has sufficient balance before making the request
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity?.subject;
+
+    if (userId) {
+      const balanceCheck = await ctx.runQuery(
+        api.billing.checkSufficientBalance,
+        {
+          userId,
+          modelId: "openai/gpt-oss-120b", // Match the model used in markdownAgent
+          estimatedInputTokens: Math.min(prompt.length / 4, 1000), // Rough estimate: 4 chars per token
+          estimatedOutputTokens: 2000, // Conservative estimate for output
+        }
+      );
+
+      if (!balanceCheck.hasSufficientBalance) {
+        throw new Error(
+          `Insufficient balance. You need approximately $${(
+            balanceCheck.estimatedCostMicroCents /
+            (1_000_000 * 100)
+          ).toFixed(4)} but only have $${balanceCheck.balanceInDollars.toFixed(
+            4
+          )}. Please add funds to your account.`
+        );
+      }
+    }
+
     const { messageId } = await markdownAgent.saveMessage(ctx, {
       threadId,
       prompt,
@@ -349,5 +462,207 @@ export const streamMarkdownAsynchronously = mutation({
       threadId,
       promptMessageId: messageId,
     });
+  },
+});
+
+export const processRawUsage = internalMutation({
+  args: {
+    rawUsageId: v.id("rawUsage"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // Fetch the rawUsage row
+    const raw = await ctx.db.get(args.rawUsageId);
+    if (!raw) {
+      console.warn("processRawUsage: rawUsage not found", args.rawUsageId);
+      return null;
+    }
+
+    const u: any = raw.usage ?? {};
+    const inputTokens = Number.isFinite(u?.inputTokens)
+      ? Number(u.inputTokens)
+      : undefined;
+    const outputTokens = Number.isFinite(u?.outputTokens)
+      ? Number(u.outputTokens)
+      : undefined;
+
+    // Nothing to charge if we don't have token counts
+    if (inputTokens === undefined && outputTokens === undefined) {
+      console.debug("processRawUsage: no token counts, skipping", {
+        rawId: args.rawUsageId,
+      });
+      return null;
+    }
+
+    // Resolve billing user document. raw.userId may already be a billing users doc _id
+    // (new rows), or it may be an external user id (legacy rows). Handle both.
+    let billingUserId: string;
+    // Try treating raw.userId as a Convex document id first.
+    let userDoc: any = null;
+    try {
+      userDoc = await ctx.db.get(raw.userId as any);
+    } catch (e) {
+      userDoc = null;
+    }
+
+    if (userDoc && (userDoc as any).receivedSignupCredit !== undefined) {
+      // raw.userId was already a billing document id
+      billingUserId = raw.userId;
+    } else {
+      // Fallback: look up by external userId field (e.g. Clerk id)
+      const existing = await ctx.db
+        .query("users")
+        .withIndex("by_userId", (q) => q.eq("userId", raw.userId))
+        .unique();
+
+      if (existing) {
+        billingUserId = existing._id;
+      } else {
+        const now = Date.now();
+        billingUserId = await ctx.db.insert("users", {
+          userId: raw.userId,
+          email: undefined,
+          name: undefined,
+          createdAt: now,
+          receivedSignupCredit: false,
+          firstPaidTopupApplied: false,
+          kycLevel: undefined,
+          status: "active",
+        });
+
+        // Create empty balance row so finalize can run safely
+        await ctx.db.insert("balances", {
+          userId: billingUserId,
+          balanceMicroCents: 0,
+          reservedMicroCents: 0,
+          updatedAt: now,
+          version: 1,
+        });
+      }
+    }
+
+    // Use idempotency key or fallback to rawUsage id for providerCallId/idempotency
+    const providerCallId =
+      typeof raw.idempotencyKey === "string"
+        ? raw.idempotencyKey
+        : args.rawUsageId;
+    const idempotencyKey =
+      typeof raw.idempotencyKey === "string"
+        ? raw.idempotencyKey
+        : args.rawUsageId;
+
+    // Call internal billing finalize to compute cost and attempt to deduct balance.
+    try {
+      await ctx.runMutation(internal.billing.internalFinalizeUsageCharge, {
+        userId: billingUserId as any,
+        modelId: raw.model,
+        providerCallId,
+        inputTokens,
+        outputTokens,
+        idempotencyKey,
+      });
+    } catch (err) {
+      // Don't throw — we don't want to break other processing. Log for investigation.
+      console.error("processRawUsage: finalize billing failed", err, {
+        rawUsageId: args.rawUsageId,
+      });
+    }
+
+    return null;
+  },
+});
+
+// Retroactive processing utilities
+
+export const listRawUsageIdsByPeriod = internalQuery({
+  args: {
+    userId: v.string(),
+    billingPeriod: v.string(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(v.id("rawUsage")),
+  handler: async (ctx, args) => {
+    // Accept either a billing user document id or an external user id (string).
+    // Resolve to the billing document id before querying the composite index.
+    let billingUserId: string;
+    // Try treating the arg as a Convex document _id first.
+    let userDoc: any = null;
+    try {
+      userDoc = await ctx.db.get(args.userId as any);
+    } catch (e) {
+      userDoc = null;
+    }
+
+    if (userDoc && (userDoc as any).receivedSignupCredit !== undefined) {
+      billingUserId = userDoc._id;
+    } else {
+      // Fallback: look up by external userId field (e.g. Clerk id)
+      const found = await ctx.db
+        .query("users")
+        .withIndex("by_userId", (q) => q.eq("userId", args.userId as string))
+        .unique();
+      if (!found) {
+        return [];
+      }
+      billingUserId = found._id;
+    }
+
+    // Query raw usage for a specific billing period and billing-user id using the composite index
+    const rows = await ctx.db
+      .query("rawUsage")
+      .withIndex("billingPeriod_userId", (q) =>
+        q.eq("billingPeriod", args.billingPeriod).eq("userId", billingUserId)
+      )
+      .order("asc")
+      .take(args.limit ?? 100);
+
+    return rows.map((r) => r._id);
+  },
+});
+
+/**
+ * Action: retroactively process a user's usage and deduct from balance.
+ *
+ * - Scans rawUsage for the given billingPeriod and user (defaults to current month)
+ * - For each usage row, invokes the internal processor which:
+ *   - resolves/creates a billing user doc and balance
+ *   - computes price and fees using configured modelTokenPrices
+ *   - charges or logs a failed usage when funds are insufficient
+ *   - uses idempotency so re-processing the same row is safe
+ */
+export const retroactivelyChargeUserUsage = action({
+  args: {
+    userId: v.string(), // external user identifier matching rawUsage.userId
+    billingPeriod: v.optional(v.string()), // e.g. "2025-09-01"; defaults to current month
+    limit: v.optional(v.number()), // max rows to process in this run
+  },
+  returns: v.object({
+    processed: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const period = args.billingPeriod ?? getBillingPeriod(Date.now());
+
+    const rawIds = await ctx.runQuery(internal.chat.listRawUsageIdsByPeriod, {
+      userId: args.userId,
+      billingPeriod: period,
+      limit: args.limit ?? 100,
+    });
+
+    let processed = 0;
+    for (const rawUsageId of rawIds) {
+      try {
+        // Safe to call repeatedly: processRawUsage and internalFinalizeUsageCharge are idempotent
+        await ctx.runMutation(internal.chat.processRawUsage, { rawUsageId });
+        processed++;
+      } catch (err) {
+        console.error("retroactivelyChargeUserUsage: failed to process", {
+          rawUsageId,
+          error: err,
+        });
+        // Continue with next row
+      }
+    }
+
+    return { processed };
   },
 });
