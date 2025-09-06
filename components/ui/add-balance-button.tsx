@@ -8,6 +8,15 @@ interface AddBalanceButtonProps {
   className?: string;
 }
 
+/**
+ * Renders an "Add Balance" button wrapped in a BalanceSelectionDialog.
+ *
+ * The button is small, outlined, contains a plus icon, and delegates dialog behavior
+ * to the surrounding BalanceSelectionDialog.
+ *
+ * @param className - Optional additional CSS classes appended to the button's class list.
+ * @returns A JSX element containing the dialog-wrapped button.
+ */
 export function AddBalanceButton({ className = "" }: AddBalanceButtonProps) {
   return (
     <BalanceSelectionDialog>

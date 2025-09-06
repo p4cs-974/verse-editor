@@ -24,7 +24,15 @@ const MICRO_CENTS_PER_CENT = 1_000_000;
 const SIGNUP_CREDIT_MICROCENTS = 200 * MICRO_CENTS_PER_CENT;
 const FIRST_TOPUP_BONUS_PCT = 5;
 const FIRST_TOPUP_BONUS_CAP_MICROCENTS = 500 * MICRO_CENTS_PER_CENT;
-const FEE_BPS = 1400; // 14%
+const FEE_BPS = 1400; /**
+ * Computes `percent`% of an amount expressed in micro-cents, using half-up rounding.
+ *
+ * The calculation treats `percent` as a whole percent (e.g., `14` means 14%).
+ *
+ * @param amountMicroCents - Amount in micro-cents (1e-6 of a cent).
+ * @param percent - Percentage to apply as a whole number (0–100+).
+ * @returns The computed share in micro-cents, rounded half-up to the nearest micro-cent.
+ */
 
 function computePercentRoundedMicro(
   amountMicroCents: number,
@@ -34,6 +42,13 @@ function computePercentRoundedMicro(
   return Math.floor((amountMicroCents * percent + 50) / 100);
 }
 
+/**
+ * Calculate the fee (in micro-cents) as a basis-points percentage of a provider cost, using half-up rounding.
+ *
+ * @param providerCostMicroCents - Provider cost expressed in micro-cents (1 micro-cent = 1e-6 cent).
+ * @param feeBps - Fee in basis points (1 bps = 0.01%); e.g., 100 bps = 1%.
+ * @returns The fee amount in micro-cents, rounded half-up to the nearest micro-cent.
+ */
 function computeFeeMicroCents(
   providerCostMicroCents: number,
   feeBps: number
@@ -42,19 +57,39 @@ function computeFeeMicroCents(
   return Math.floor((providerCostMicroCents * feeBps + 5_000) / 10_000);
 }
 
+/**
+ * Convert a monetary amount in micro-cents to whole cents, rounding half-up.
+ *
+ * micro is expressed in micro-cents (1e-6 of a cent). The value is rounded
+ * to the nearest cent using half-up (values with 0.5 cents round up).
+ *
+ * @param micro - Amount in micro-cents.
+ * @returns Amount in whole cents (integer).
+ */
 function microToCentsRounded(micro: number): number {
   return Math.floor((micro + 500_000) / 1_000_000);
 }
 
+/**
+ * Convert an amount in cents to micro-cents.
+ *
+ * Micro-cents are 1e-6 of a cent (1 cent = 1,000,000 micro-cents). Returns the equivalent value in micro-cents.
+ *
+ * @param cents - Amount in cents (may be fractional)
+ * @returns Amount in micro-cents
+ */
 function centsToMicro(cents: number): number {
   return cents * MICRO_CENTS_PER_CENT;
 }
 
 /**
- * Helper to look up a user document and billing ID from either a Convex document ID
- * or an external user ID (e.g. Clerk subject).
+ * Resolve a billing user document and its billing user ID from either a Convex document ID or an external user ID.
  *
- * @returns An object with the user document and its billing ID, or null if not found
+ * Prefers a direct Convex document lookup when `userId` appears to be a Convex ID; otherwise queries the `users`
+ * table by the external `userId` value (for example, a Clerk subject). Returns null if no user is found.
+ *
+ * @param userId - Either a Convex `users` document ID or an external user identifier (e.g., Clerk subject)
+ * @returns The found user document and its billing user `_id`, or `null` when no matching user exists
  */
 async function lookupUserDoc(
   ctx: QueryCtx,

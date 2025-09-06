@@ -25,6 +25,15 @@ interface BalanceDisplayProps {
   userId: Id<"users">;
 }
 
+/**
+ * Displays a user's account balance, reserved amounts, signup/top-up bonus status, a top-up UI, and up to five recent transactions.
+ *
+ * Shows a loading state while the balance is being fetched. Provides an inline top-up flow (amount input -> PaymentForm)
+ * and closes the payment form on success or error; balance updates rely on Convex reactivity. Transaction amounts are
+ * color-coded by sign and dates are localized.
+ *
+ * @param userId - The Id<"users"> for the account whose balance and transactions should be displayed.
+ */
 export function BalanceDisplay({ userId }: BalanceDisplayProps) {
   const balance = useQuery(api.billing.getUserBalance, { userId });
   const transactions = useQuery(api.billing.getUserTransactions, {
