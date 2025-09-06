@@ -144,7 +144,15 @@ export const validators = {
 };
 
 /**
- * Safe async wrapper that converts errors to BillingError
+ * Execute an async operation and normalize any non-BillingError into a BillingError.
+ *
+ * If the operation throws a BillingError it is rethrown unchanged. Any other thrown value
+ * is wrapped in a new BillingError with code `INTERNAL_ERROR`, statusCode `500`, and
+ * metadata containing the original error message under `originalError`.
+ *
+ * @param operation - Async function to execute.
+ * @param errorContext - Short context string included in the wrapped error message.
+ * @returns The resolved value of `operation`.
  */
 export async function safeExecute<T>(
   operation: () => Promise<T>,

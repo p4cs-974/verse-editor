@@ -393,6 +393,16 @@ function Story({ threadId }: { threadId: string }) {
   );
 }
 
+/**
+ * Renders the Assistant popover layout for a given thread.
+ *
+ * Displays a header with the "Assistant" title, the user's balance, and an add-balance action,
+ * then shows the Story component for the provided threadId or a centered "Loading..." indicator
+ * when no threadId is available.
+ *
+ * @param threadId - Identifier of the thread whose assistant messages should be shown. When falsy, a loading placeholder is rendered.
+ * @returns The popover content as a JSX element.
+ */
 export default function AssistantPopoverContent({
   threadId,
 }: PopoverContentProps) {

@@ -14,13 +14,18 @@ if (!process.env.NEXT_PUBLIC_CONVEX_URL) {
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
 
 /**
- * Wrapper hook for Clerk's useAuth that prefers requesting a Clerk JWT template
- * when available. Set NEXT_PUBLIC_CLERK_JWT_TEMPLATE in your environment to the
- * name of a JWT template you created in the Clerk dashboard that issues a JWT
- * containing the user id/claims Convex expects.
+ * Wraps Clerk's `useAuth` to provide a Convex-compatible `getToken`.
  *
- * The wrapper keeps the rest of Clerk's useAuth API intact while overriding
- * getToken to request the JWT template first and fall back to the default token.
+ * When `NEXT_PUBLIC_CLERK_JWT_TEMPLATE` is set, the returned `getToken` will
+ * first attempt to request a token using that JWT template and fall back to
+ * Clerk's default `getToken` if the template request fails. If the underlying
+ * `getToken` is not available, calls return `null`.
+ *
+ * The hook preserves the original `useAuth` object shape but replaces `getToken`
+ * with the wrapped implementation.
+ *
+ * @returns The `useAuth` object from Clerk with `getToken` overridden to prefer
+ * the configured JWT template.
  */
 function useAuthForConvex() {
   const auth = useAuth();
@@ -82,6 +87,16 @@ function EnsureBillingUser() {
   return null;
 }
 
+/**
+ * Wraps the app in a Convex provider that uses Clerk-aware authentication and ensures a billing user exists.
+ *
+ * This component renders a ConvexProvider configured with the shared Convex client and a Clerk-aware `useAuth`
+ * hook, mounts an internal side-effect component that creates a minimal billing record for the authenticated
+ * Clerk user, and then renders `children`.
+ *
+ * @param children - React node(s) to render inside the Convex provider.
+ * @returns The provider tree containing billing initialization and the supplied children.
+ */
 export default function ConvexClientProvider({
   children,
 }: {

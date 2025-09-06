@@ -56,6 +56,17 @@ interface BalanceSelectionDialogProps {
   children: React.ReactNode;
 }
 
+/**
+ * Renders a modal dialog that lets the user choose a predefined balance top-up and starts a Stripe checkout flow.
+ *
+ * When an option is selected the component POSTs { amountCents } to /api/stripe/create-checkout-session to create
+ * a dynamic Stripe Checkout session. If a valid Stripe checkout URL is returned it is opened in a new tab; on any
+ * error or if the URL is invalid the component falls back to opening the option's static `paymentUrl` in a new tab.
+ *
+ * The UI shows a per-option loading state while the checkout session is being created and disables other options
+ * until the request completes. The component also queries the user's display balance (api.billing.getUserBalanceForDisplay)
+ * to determine whether a 5% first-time top-up bonus applies and displays the bonus and total for each option when applicable.
+ */
 export function BalanceSelectionDialog({
   children,
 }: BalanceSelectionDialogProps) {

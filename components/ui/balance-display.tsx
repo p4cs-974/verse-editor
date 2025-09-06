@@ -8,6 +8,16 @@ interface BalanceDisplayProps {
   className?: string;
 }
 
+/**
+ * Renders the user's balance and animates transitions when it changes.
+ *
+ * Shows "Loading..." until balance data is available. Once loaded it initializes the
+ * displayed value and smoothly animates any subsequent changes over 800ms using a
+ * cubic ease-out easing. The numeric balance is rendered with four decimal places.
+ * An optional `className` prop is applied to the component's root container.
+ *
+ * @returns A React element containing the balance label and value.
+ */
 export function BalanceDisplay({ className = "" }: BalanceDisplayProps) {
   const balanceData = useQuery(api.billing.getUserBalanceForDisplay);
   const [displayBalance, setDisplayBalance] = useState(0);

@@ -25,6 +25,16 @@ const badgeVariants = cva(
   }
 )
 
+/**
+ * Compact badge UI component with selectable visual variants.
+ *
+ * Renders a styled inline element (a `span` by default) and applies classes from `badgeVariants`.
+ *
+ * @param className - Additional CSS classes to merge with the variant classes.
+ * @param variant - Visual style variant to apply (`default`, `secondary`, `destructive`, or `outline`).
+ * @param asChild - If true, uses Radix `Slot` so the caller can provide the underlying element; otherwise renders a `span`.
+ * @returns A JSX element for the badge with remaining props spread onto the rendered element.
+ */
 function Badge({
   className,
   variant,

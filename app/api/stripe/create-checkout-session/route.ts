@@ -20,6 +20,15 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
     | undefined,
 });
 
+/**
+ * Creates a Stripe Checkout Session for an authenticated Clerk user.
+ *
+ * Validates the request body for `amountCents`, maps the amount to a predefined Stripe price ID,
+ * and returns a JSON response containing `sessionUrl` and `sessionId` on success.
+ *
+ * Returns HTTP 401 if the requester is unauthenticated, 400 for missing/invalid amounts or
+ * when no price is configured for the provided amount, and 500 for unexpected server errors.
+ */
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();
