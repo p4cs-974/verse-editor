@@ -208,16 +208,16 @@ async function handleDispute(dispute: Stripe.Dispute) {
         });
       }
     }
-    const customer = await stripe.customers.retrieve(customerId);
+    // const customer = await stripe.customers.retrieve(customerId);
 
-    if ("deleted" in customer && customer.deleted) {
-      console.log("Invoice payment for deleted customer");
-      return;
-    }
+    // if ("deleted" in customer && customer.deleted) {
+    //   console.log("Invoice payment for deleted customer");
+    //   return;
+    // }
 
-    const userId = !("deleted" in customer)
-      ? customer.metadata?.userId
-      : undefined;
+    // const userId = !("deleted" in customer)
+    //   ? customer.metadata?.userId
+    //   : undefined;
   } catch (error) {
     console.error("Error handling dispute:", error);
   }
