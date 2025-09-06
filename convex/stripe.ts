@@ -2,16 +2,6 @@ import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import Stripe from "stripe";
 
-// convex/stripe.ts
-
-import { httpAction } from "convex/server";
-import Stripe from "stripe";
-
-// Before: lines 10–12
-// const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
-//   // apiVersion: "2023-10-16",
-// });
-
 // After applying diff:
 
 const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -24,6 +14,11 @@ const stripe = stripeKey
     })
   : null;
 
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+if (!webhookSecret) {
+  console.error("STRIPE_WEBHOOK_SECRET environment variable is not configured");
+}
+
 // … other setup code …
 
 export const stripeWebhook = httpAction(async (ctx, request) => {
@@ -32,6 +27,11 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
 
   if (!signature) {
     return new Response("No signature provided", { status: 400 });
+  }
+
+  if (!stripe || !webhookSecret) {
+    console.error("Stripe not configured for webhook processing");
+    return new Response("Stripe not configured", { status: 500 });
   }
 
   let event;
@@ -103,13 +103,13 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
       }
 
       // Apply the topup to the user's balance
-      (await ctx.runMutation(api.billing.webhookApplyTopup, {
+      await ctx.runMutation(api.billing.webhookApplyTopup, {
         userId,
         amountMicroCents,
         paymentProvider: "stripe",
         paymentReference: session.id,
         idempotencyKey: event.id,
-      })) as void;
+      });
 
       console.log(
         `Successfully processed payment for user ${userId}: $${

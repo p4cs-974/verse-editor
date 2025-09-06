@@ -46,7 +46,9 @@ export default function GalleryPopoverContent({
   useEffect(() => {
     if (!imagesFromServer) return; // still loading or not authed
     const current = getUserImagesMap();
-    const serverSet = new Set(imagesFromServer.map((i) => i.fileUrl));
+    const serverSet = new Set(
+      imagesFromServer.map((i: { fileUrl: string }) => i.fileUrl)
+    );
     let changed = false;
 
     // Prune locals missing on server

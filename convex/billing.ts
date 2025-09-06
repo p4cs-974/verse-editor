@@ -1,11 +1,6 @@
 import { mutation, internalMutation, query, action } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
-import { internal } from "./_generated/api";
-
-import { mutation, internalMutation, query, action } from "./_generated/server";
-import { v } from "convex/values";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 import { QueryCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
@@ -482,9 +477,6 @@ export const internalFinalizeUsageCharge = internalMutation({
     }
 
     const outputPriceMicro =
-      priceRow.priceMicroCentsPerOutputToken ??
-      (priceRow as any).priceMicroCentsPerToken ??
-      const outputPriceMicro =
       priceRow?.priceMicroCentsPerOutputToken ??
       (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
       inputPriceMicro;
@@ -1245,43 +1237,16 @@ export const createCheckoutSession = action({
     }
 
     // Ensure billing user exists using mutation (actions can't access db directly)
-    const billingUserId = await ctx.runMutation(
-      internal.billing.ensureBillingUserExists,
+    const billingUserId: string = await ctx.runMutation(
+      api.billing.ensureBillingUserExists,
       {
         email: userEmail,
         name: userName,
       }
     );
 
-    // Use the MCP Stripe server to create a checkout session
-    // const baseUrl = process.env.CONVEX_SITE_URL || "http://localhost:3000";
-
-    // Map amount to existing price IDs
-    const priceMap: Record<number, string> = {
-      500: "price_1S43f14QJxtRRVlaZrCQLtBd", // $5
-      1000: "price_1S43a34QJxtRRVlacOMS5vFh", // $10
-      2500: "price_1S43fZ4QJxtRRVlayUqIwgTI", // $25
-      5000: "price_1S43gq4QJxtRRVlalmT8ByfC", // $50
-    };
-
-    const priceId = priceMap[args.amountCents];
-    if (!priceId) {
-      throw new Error(
-     const linkMap: Record<number, string> = {
-       500: process.env.STRIPE_LINK_5,
-       1000: process.env.STRIPE_LINK_10,
-       2500: process.env.STRIPE_LINK_25,
-       5000: process.env.STRIPE_LINK_50,
-     };
-
-     const sessionUrl = linkMap[args.amountCents];
-     if (!sessionUrl) {
-       throw new Error(
-         `Stripe payment link not configured for amount: ${args.amountCents / 100}. ` +
-         `Please set the STRIPE_LINK_${args.amountCents / 100} environment variable.`
-       );
-     }
-    // In production, you'd create a dynamic checkout session with the Stripe API
+    // Use pre-configured Stripe payment links from env vars
+    // In production, consider creating dynamic sessions/links via Stripe API or MCP
     const linkMap: Record<number, string> = {
       500: process.env.STRIPE_LINK_5 || "",
       1000: process.env.STRIPE_LINK_10 || "",
@@ -1289,15 +1254,23 @@ export const createCheckoutSession = action({
       5000: process.env.STRIPE_LINK_50 || "",
     };
 
+    const sessionUrl: string = linkMap[args.amountCents];
+    if (!sessionUrl) {
+      throw new Error(
+        `Stripe payment link not configured for amount: ${
+          args.amountCents / 100
+        } cents. ` +
+          `Please set the STRIPE_LINK_${args.amountCents} environment variable.`
+      );
+    }
+
+    const sessionId: string = `session_${billingUserId}_${Date.now()}`;
+
+    // Note: For payment links, client_reference_id and metadata are set when creating the link.
+    // If using dynamic links, include billingUserId in metadata for webhook processing.
     const sessionData = {
-      sessionUrl: linkMap[args.amountCents] || linkMap[1000], // Default to $10
-      sessionId: `session_${billingUserId}_${Date.now()}`,
-      // Include the billing user id in the Stripe session so the webhook can
-      // attribute the payment to the correct users table record.
-      client_reference_id: billingUserId,
-      metadata: {
-        userId: billingUserId,
-      },
+      sessionUrl,
+      sessionId,
     };
 
     return sessionData;

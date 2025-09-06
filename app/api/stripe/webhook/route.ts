@@ -108,7 +108,7 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
   try {
     const result = await convex.mutation(api.billing.webhookApplyTopup, {
       userId,
-      amountCents: topupAmountCents,
+      amountMicroCents: topupAmountCents * 1000000,
       paymentProvider: "stripe",
       paymentReference: paymentIntent.id,
       idempotencyKey,
