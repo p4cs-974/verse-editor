@@ -121,6 +121,6 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
     return new Response("OK", { status: 200 });
   } catch (error) {
     console.error("Stripe webhook error:", error);
-    return new Response("Webhook processing failed", { status: 400 });
+    return new Response("Webhook processing failed", { status: 500 });
   }
 });
