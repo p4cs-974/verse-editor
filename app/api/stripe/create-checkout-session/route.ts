@@ -10,7 +10,15 @@ import Stripe from "stripe";
  * Requires: STRIPE_SECRET_KEY in environment.
  */
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+if (!STRIPE_SECRET_KEY) {
+  throw new Error("Missing STRIPE_SECRET_KEY in environment");
+}
+const stripe = new Stripe(STRIPE_SECRET_KEY, {
+  apiVersion: process.env.STRIPE_API_VERSION as
+    | Stripe.LatestApiVersion
+    | undefined,
+});
 
 export async function POST(request: NextRequest) {
   try {

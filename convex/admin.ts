@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
@@ -224,14 +224,14 @@ export const getBillingAnalytics = query({
 
       switch (tx.type) {
         case "model_charge":
-          totalProviderCostCents += Math.abs(tx.providerCostCents || 0);
-          totalFeesCollectedCents += Math.abs(tx.feeCents || 0);
+          totalProviderCostCents += Math.abs(tx.providerCostMicroCents || 0);
+          totalFeesCollectedCents += Math.abs(tx.feeMicroCents || 0);
           break;
         case "topup":
-          totalTopupsCents += tx.amountCents;
+          totalTopupsCents += tx.amountMicroCents;
           break;
         case "bonus":
-          totalBonusesAwarded += tx.amountCents;
+          totalBonusesAwarded += tx.amountMicroCents;
           break;
       }
     }
@@ -282,43 +282,46 @@ export const getReconciliationData = query({
       .collect();
 
     const recordedProviderCostCents = providerTransactions.reduce(
-      (sum, tx) => sum + tx.amountCents,
+      (sum, tx) => sum + tx.amountMicroCents,
       0
     );
 
-    // Sum up provider invoices
-    const invoiceFilter = args.provider
-      ? (q: any) =>
-          q.and(
-            q.eq(q.field("provider"), args.provider),
-            q.gte(q.field("invoiceDate"), args.startDate),
-            q.lte(q.field("invoiceDate"), args.endDate)
-          )
-      : (q: any) =>
-          q.and(
-            q.gte(q.field("invoiceDate"), args.startDate),
-            q.lte(q.field("invoiceDate"), args.endDate)
-          );
+    // Fetch all provider invoices and filter in memory
+    const invoices = await ctx.db.query("providerInvoices").collect();
 
-    const invoices = await ctx.db
-      .query("providerInvoices")
-      .filter(invoiceFilter)
-      .collect();
+    const filteredInvoices = invoices.filter(
+      (invoice) =>
+        invoice.invoiceDate >= args.startDate &&
+        invoice.invoiceDate <= args.endDate &&
+        (!args.provider || invoice.provider === args.provider)
+    );
 
-    const invoicedAmountCents = invoices.reduce(
-      (sum, inv) => sum + inv.amountCents,
+    // const invoicedAmountMicroCents = filteredInvoices.reduce(
+    //   (sum, inv) => sum + inv.amountMicroCents,
+    //   0
+    // );
+
+    const recordedProviderCostMicroCents = providerTransactions.reduce(
+      (sum, tx) => sum + tx.amountMicroCents,
       0
     );
 
-    const varianceCents = Math.abs(
-      recordedProviderCostCents - invoicedAmountCents
+    const invoicedAmountMicroCents = filteredInvoices.reduce(
+      (sum, inv) => sum + inv.amountMicroCents,
+      0
     );
-    const reconciled = varianceCents < 100; // Consider reconciled if variance < $1
+
+    const varianceMicroCents = Math.abs(
+      recordedProviderCostMicroCents - invoicedAmountMicroCents
+    );
+    const reconciled = varianceMicroCents < 1_000_000; // Consider reconciled if variance < $0.01 (1 cent = 1,000,000 micro cents)
 
     return {
-      recordedProviderCostCents,
-      invoicedAmountCents,
-      varianceCents,
+      recordedProviderCostCents: Math.floor(
+        recordedProviderCostMicroCents / 1_000_000
+      ),
+      invoicedAmountCents: Math.floor(invoicedAmountMicroCents / 1_000_000),
+      varianceCents: Math.floor(varianceMicroCents / 1_000_000),
       reconciled,
     };
   },
@@ -331,7 +334,7 @@ export const recordProviderInvoice = mutation({
   args: {
     provider: v.string(),
     invoiceDate: v.number(),
-    amountCents: v.number(),
+    amountMicroCents: v.number(),
     metadata: v.optional(v.object({})),
   },
   returns: v.object({
@@ -341,7 +344,7 @@ export const recordProviderInvoice = mutation({
     const invoiceId = await ctx.db.insert("providerInvoices", {
       provider: args.provider,
       invoiceDate: args.invoiceDate,
-      amountCents: args.amountCents,
+      amountMicroCents: args.amountMicroCents,
       metadata: args.metadata || {},
       reconciled: false,
       createdAt: Date.now(),
@@ -357,7 +360,7 @@ export const recordProviderInvoice = mutation({
 export const applyBalanceAdjustment = mutation({
   args: {
     userId: v.id("users"),
-    amountCents: v.number(),
+    amountMicroCents: v.number(),
     reason: v.string(),
     adminId: v.string(),
     idempotencyKey: v.optional(v.string()),
@@ -382,7 +385,7 @@ export const applyBalanceAdjustment = mutation({
           .unique();
         return {
           transactionId: existing.resultReference || "",
-          newBalanceCents: balance?.balanceCents || 0,
+          newBalanceCents: balance?.balanceMicroCents || 0,
         };
       }
     }
@@ -393,16 +396,16 @@ export const applyBalanceAdjustment = mutation({
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .unique();
 
-    const currentBalance = balanceRow?.balanceCents || 0;
-    const newBalance = currentBalance + args.amountCents;
+    const currentBalance = balanceRow?.balanceMicroCents || 0;
+    const newBalance = currentBalance + args.amountMicroCents;
 
     // Insert transaction
     const transactionId = await ctx.db.insert("transactions", {
       userId: args.userId,
       type: "admin_adjust",
-      amountCents: args.amountCents,
-      providerCostCents: undefined,
-      feeCents: undefined,
+      amountMicroCents: args.amountMicroCents,
+      providerCostMicroCents: undefined,
+      feeMicroCents: undefined,
       referenceId: undefined,
       idempotencyKey: args.idempotencyKey,
       metadata: { reason: args.reason, adminId: args.adminId },
@@ -412,15 +415,15 @@ export const applyBalanceAdjustment = mutation({
     // Update balance
     if (balanceRow) {
       await ctx.db.patch(balanceRow._id, {
-        balanceCents: newBalance,
+        balanceMicroCents: newBalance,
         updatedAt: now,
         version: (balanceRow.version || 0) + 1,
       });
     } else {
       await ctx.db.insert("balances", {
         userId: args.userId,
-        balanceCents: newBalance,
-        reservedCents: 0,
+        balanceMicroCents: newBalance,
+        reservedMicroCents: 0,
         updatedAt: now,
         version: 1,
       });
@@ -462,7 +465,7 @@ export const getUsersWithLowBalances = query({
   handler: async (ctx, args) => {
     const balances = await ctx.db
       .query("balances")
-      .filter((q) => q.lt(q.field("balanceCents"), args.thresholdCents))
+      .filter((q) => q.lt(q.field("balanceMicroCents"), args.thresholdCents))
       .take(args.limit || 100);
 
     const result = [];
@@ -476,7 +479,7 @@ export const getUsersWithLowBalances = query({
 
       result.push({
         userId: balance.userId,
-        balanceCents: balance.balanceCents,
+        balanceCents: balance.balanceMicroCents,
         lastTopupDate: lastTopup?.createdAt,
       });
     }

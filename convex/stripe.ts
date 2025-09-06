@@ -1,5 +1,30 @@
 import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import Stripe from "stripe";
+
+// convex/stripe.ts
+
+import { httpAction } from "convex/server";
+import Stripe from "stripe";
+
+// Before: lines 10–12
+// const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+//   // apiVersion: "2023-10-16",
+// });
+
+// After applying diff:
+
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+if (!stripeKey) {
+  console.error("STRIPE_SECRET_KEY environment variable is not configured");
+}
+const stripe = stripeKey
+  ? new Stripe(stripeKey, {
+      // apiVersion: "2023-10-16",
+    })
+  : null;
+
+// … other setup code …
 
 export const stripeWebhook = httpAction(async (ctx, request) => {
   const body = await request.text();
@@ -9,17 +34,34 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
     return new Response("No signature provided", { status: 400 });
   }
 
+  let event;
   try {
-    // In a real app, you would verify the webhook signature here
-    // For this demo, we'll process the event directly
-    const event = JSON.parse(body);
+    event = await stripe.webhooks.constructEventAsync(
+      body,
+      signature,
+      webhookSecret
+    );
+  } catch (err) {
+    const error = err as Error;
+    console.error("Webhook signature verification failed:", error.message);
+    return new Response(
+      `Webhook signature verification failed: ${error.message}`,
+      { status: 400 }
+    );
+  }
 
+  try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
 
       // Extract user information and payment details
       const customerId = session.customer;
       const amountTotal = session.amount_total; // in cents
+
+      if (!amountTotal) {
+        console.error("No amount_total found in Stripe session:", session.id);
+        return new Response("No amount_total in session", { status: 400 });
+      }
 
       // Convert cents to microcents (multiply by 1,000,000)
       const amountMicroCents = amountTotal * 1_000_000;
@@ -61,17 +103,17 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
       }
 
       // Apply the topup to the user's balance
-      await ctx.runMutation(api.billing.webhookApplyTopup, {
+      (await ctx.runMutation(api.billing.webhookApplyTopup, {
         userId,
         amountMicroCents,
         paymentProvider: "stripe",
         paymentReference: session.id,
         idempotencyKey: event.id,
-      });
+      })) as void;
 
       console.log(
         `Successfully processed payment for user ${userId}: $${
-          amountTotal / 100
+          amountTotal ? amountTotal / 100 : "unknown"
         }`
       );
     }

@@ -136,8 +136,8 @@ export const validators = {
         "INVALID_PRICE"
       );
     }
-    if (price > 1_000_000_000) {
-      // $1000/token max
+    if (price > 100_000_000_000) {
+      // $1000/token max (1000 dollars * 100 cents * 1_000_000 micro-cents)
       throw new BillingError("Price exceeds maximum limit", "PRICE_TOO_LARGE");
     }
   },

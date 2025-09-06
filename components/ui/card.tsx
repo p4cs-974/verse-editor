@@ -1,5 +1,9 @@
 import { cn } from "@/lib/utils";
 
+("use client");
+
+import { cn } from "@/lib/utils";
+
 const Card = ({
   className,
   ...props

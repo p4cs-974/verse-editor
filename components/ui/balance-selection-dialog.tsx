@@ -24,23 +24,31 @@ const BALANCE_OPTIONS: BalanceOption[] = [
   {
     amount: 5,
     label: "$5",
-    paymentUrl: "https://buy.stripe.com/test_3cIbIUdnH4ofeL133hdAk01",
+    paymentUrl:
+      process.env.STRIPE_LINK_5 ||
+      "https://buy.stripe.com/test_3cIbIUdnH4ofeL133hdAk01",
   },
   {
     amount: 10,
     label: "$10",
-    paymentUrl: "https://buy.stripe.com/test_eVqeV60AV3kb6evgU7dAk00",
+    paymentUrl:
+      process.env.STRIPE_LINK_10 ||
+      "https://buy.stripe.com/test_eVqeV60AV3kb6evgU7dAk00",
     popular: true,
   },
   {
     amount: 25,
     label: "$25",
-    paymentUrl: "https://buy.stripe.com/test_00w7sE2J32g79qH8nBdAk02",
+    paymentUrl:
+      process.env.STRIPE_LINK_25 ||
+      "https://buy.stripe.com/test_00w7sE2J32g79qH8nBdAk02",
   },
   {
     amount: 50,
     label: "$50",
-    paymentUrl: "https://buy.stripe.com/test_28E4gsfvP8Ev1YffQ3dAk03",
+    paymentUrl:
+      process.env.STRIPE_LINK_50 ||
+      "https://buy.stripe.com/test_28E4gsfvP8Ev1YffQ3dAk03",
   },
 ];
 
@@ -73,7 +81,13 @@ export function BalanceSelectionDialog({
       }
 
       const { sessionUrl } = await response.json();
-      window.open(sessionUrl, "_blank");
+      // Validate that the URL is from Stripe
+      if (sessionUrl && sessionUrl.startsWith("https://checkout.stripe.com/")) {
+        window.open(sessionUrl, "_blank");
+      } else {
+        console.error("Invalid checkout session URL");
+        throw new Error("Invalid checkout session URL");
+      }
     } catch (error) {
       console.error("Error creating checkout session:", error);
       // Fallback to static payment link

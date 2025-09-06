@@ -3,6 +3,13 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 
+import { mutation, internalMutation, query, action } from "./_generated/server";
+import { v } from "convex/values";
+import { internal } from "./_generated/api";
+
+import { QueryCtx } from "./_generated/server";
+import { Doc, Id } from "./_generated/dataModel";
+
 /**
  * Billing-related Convex functions (updated to micro-cents)
  *
@@ -41,6 +48,42 @@ function microToCentsRounded(micro: number): number {
 
 function centsToMicro(cents: number): number {
   return cents * MICRO_CENTS_PER_CENT;
+}
+
+/**
+ * Helper to look up a user document and billing ID from either a Convex document ID
+ * or an external user ID (e.g. Clerk subject).
+ *
+ * @returns An object with the user document and its billing ID, or null if not found
+ */
+async function lookupUserDoc(
+  ctx: QueryCtx,
+  userId: string | Id<"users">
+): Promise<{ userDoc: Doc<"users">; billingUserId: Id<"users"> } | null> {
+  // First try direct lookup if it looks like a Convex ID
+  if (
+    typeof userId === "string" &&
+    userId.startsWith("j") &&
+    userId.length > 20
+  ) {
+    try {
+      const doc = await ctx.db.get(userId as Id<"users">);
+      if (doc?.receivedSignupCredit !== undefined) {
+        return { userDoc: doc, billingUserId: doc._id };
+      }
+    } catch {
+      // Not a valid Convex ID or document not found, fall through to userId lookup
+    }
+  }
+
+  // Try looking up by external userId
+  const found = await ctx.db
+    .query("users")
+    .withIndex("by_userId", (q) => q.eq("userId", userId as string))
+    .unique();
+
+  if (!found) return null;
+  return { userDoc: found, billingUserId: found._id };
 }
 
 export const createUserWithSignupCredit = mutation({
@@ -423,16 +466,28 @@ export const internalFinalizeUsageCharge = internalMutation({
       .order("desc")
       .first();
 
-    const inputPriceMicro =
-      priceRow?.priceMicroCentsPerInputToken ??
-      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined);
-    const outputPriceMicro =
-      priceRow?.priceMicroCentsPerOutputToken ??
-      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined);
-
-    if (!priceRow || inputPriceMicro === undefined) {
-      throw new Error("No price configured for model " + args.modelId);
+    if (!priceRow) {
+      throw new Error(
+        `No price configuration found for model ${args.modelId}. Please configure model pricing before use.`
+      );
     }
+
+    const inputPriceMicro =
+      priceRow.priceMicroCentsPerInputToken ??
+      (priceRow as any).priceMicroCentsPerToken;
+    if (inputPriceMicro === undefined) {
+      throw new Error(
+        `Invalid price configuration for model ${args.modelId}: missing input token price`
+      );
+    }
+
+    const outputPriceMicro =
+      priceRow.priceMicroCentsPerOutputToken ??
+      (priceRow as any).priceMicroCentsPerToken ??
+      const outputPriceMicro =
+      priceRow?.priceMicroCentsPerOutputToken ??
+      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
+      inputPriceMicro;
 
     const inputTokens = args.inputTokens ?? args.tokensUsed ?? 0;
     const outputTokens = args.outputTokens ?? 0;
@@ -607,26 +662,9 @@ export const getUserBalance = query({
     firstPaidTopupApplied: v.boolean(),
   }),
   handler: async (ctx, args) => {
-    let userDoc: any = null;
-    let billingUserId: string;
-
-    try {
-      userDoc = await ctx.db.get(args.userId as any);
-    } catch {
-      userDoc = null;
-    }
-
-    if (userDoc && (userDoc as any).receivedSignupCredit !== undefined) {
-      billingUserId = userDoc._id;
-    } else {
-      const found = await ctx.db
-        .query("users")
-        .withIndex("by_userId", (q) => q.eq("userId", args.userId as string))
-        .unique();
-      if (!found) throw new Error("User not found");
-      userDoc = found;
-      billingUserId = found._id;
-    }
+    const result = await lookupUserDoc(ctx, args.userId);
+    if (!result) throw new Error("User not found");
+    const { userDoc, billingUserId } = result;
 
     const balance = await ctx.db
       .query("balances")
@@ -854,15 +892,25 @@ export const webhookFinalizeUsageCharge = mutation({
       .order("desc")
       .first();
 
-    const inputPriceMicro =
-      priceRow?.priceMicroCentsPerInputToken ??
-      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
-      2000;
-    const outputPriceMicro =
-      priceRow?.priceMicroCentsPerOutputToken ??
-      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
-      inputPriceMicro;
+    if (!priceRow) {
+      throw new Error(
+        `No price configuration found for model ${args.modelId}. Please configure model pricing before use.`
+      );
+    }
 
+    const inputPriceMicro =
+      priceRow.priceMicroCentsPerInputToken ??
+      (priceRow as any).priceMicroCentsPerToken;
+    if (inputPriceMicro === undefined) {
+      throw new Error(
+        `Invalid price configuration for model ${args.modelId}: missing input token price`
+      );
+    }
+
+    const outputPriceMicro =
+      priceRow.priceMicroCentsPerOutputToken ??
+      (priceRow as any).priceMicroCentsPerToken ??
+      inputPriceMicro;
     const inputTokens = args.inputTokens ?? args.tokensUsed ?? 0;
     const outputTokens = args.outputTokens ?? 0;
 
@@ -1000,25 +1048,9 @@ export const getUserTransactions = query({
     })
   ),
   handler: async (ctx, args) => {
-    let userDoc: any = null;
-    let billingUserId: string;
-
-    try {
-      userDoc = await ctx.db.get(args.userId as any);
-    } catch {
-      userDoc = null;
-    }
-
-    if (userDoc && (userDoc as any).receivedSignupCredit !== undefined) {
-      billingUserId = userDoc._id;
-    } else {
-      const found = await ctx.db
-        .query("users")
-        .withIndex("by_userId", (q) => q.eq("userId", args.userId as string))
-        .unique();
-      if (!found) return [];
-      billingUserId = found._id;
-    }
+    const result = await lookupUserDoc(ctx, args.userId);
+    if (!result) return [];
+    const { billingUserId } = result;
 
     const transactions = await ctx.db
       .query("transactions")
@@ -1101,13 +1133,17 @@ export const checkSufficientBalance = query({
     // Use default pricing if not configured (same as in internalFinalizeUsageCharge)
     const inputPriceMicro =
       priceRow?.priceMicroCentsPerInputToken ??
-      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
-      2000; // Default fallback
+      (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined);
+
+    if (inputPriceMicro === undefined) {
+      throw new Error(`No price configured for model ${args.modelId}`);
+    }
 
     const outputPriceMicro =
       priceRow?.priceMicroCentsPerOutputToken ??
       (priceRow ? (priceRow as any).priceMicroCentsPerToken : undefined) ??
       inputPriceMicro;
+    inputPriceMicro;
 
     // Estimate tokens (use conservative estimates if not provided)
     const inputTokens = args.estimatedInputTokens ?? 1000; // Conservative estimate
@@ -1157,33 +1193,16 @@ export const getUserBalanceForDisplay = query({
     }
 
     // Get user document and balance directly
-    let userDoc: any = null;
-    let billingUserId: string;
-
-    try {
-      userDoc = await ctx.db.get(clerkId as any);
-    } catch {
-      userDoc = null;
+    const result = await lookupUserDoc(ctx, clerkId);
+    if (!result) {
+      return {
+        balanceMicroCents: 0,
+        balanceInDollars: 0,
+        receivedSignupCredit: false,
+        firstPaidTopupApplied: false,
+      };
     }
-
-    if (userDoc && (userDoc as any).receivedSignupCredit !== undefined) {
-      billingUserId = userDoc._id;
-    } else {
-      const found = await ctx.db
-        .query("users")
-        .withIndex("by_userId", (q) => q.eq("userId", clerkId))
-        .unique();
-      if (!found) {
-        return {
-          balanceMicroCents: 0,
-          balanceInDollars: 0,
-          receivedSignupCredit: false,
-          firstPaidTopupApplied: false,
-        };
-      }
-      userDoc = found;
-      billingUserId = found._id;
-    }
+    const { userDoc, billingUserId } = result;
 
     const balance = await ctx.db
       .query("balances")
@@ -1235,7 +1254,7 @@ export const createCheckoutSession = action({
     );
 
     // Use the MCP Stripe server to create a checkout session
-    const baseUrl = process.env.CONVEX_SITE_URL || "http://localhost:3000";
+    // const baseUrl = process.env.CONVEX_SITE_URL || "http://localhost:3000";
 
     // Map amount to existing price IDs
     const priceMap: Record<number, string> = {
@@ -1248,17 +1267,26 @@ export const createCheckoutSession = action({
     const priceId = priceMap[args.amountCents];
     if (!priceId) {
       throw new Error(
-        `No price configured for amount: $${args.amountCents / 100}`
-      );
-    }
+     const linkMap: Record<number, string> = {
+       500: process.env.STRIPE_LINK_5,
+       1000: process.env.STRIPE_LINK_10,
+       2500: process.env.STRIPE_LINK_25,
+       5000: process.env.STRIPE_LINK_50,
+     };
 
-    // For now, return the existing payment link as a fallback
+     const sessionUrl = linkMap[args.amountCents];
+     if (!sessionUrl) {
+       throw new Error(
+         `Stripe payment link not configured for amount: ${args.amountCents / 100}. ` +
+         `Please set the STRIPE_LINK_${args.amountCents / 100} environment variable.`
+       );
+     }
     // In production, you'd create a dynamic checkout session with the Stripe API
     const linkMap: Record<number, string> = {
-      500: "https://buy.stripe.com/test_3cIbIUdnH4ofeL133hdAk01", // $5
-      1000: "https://buy.stripe.com/test_eVqeV60AV3kb6evgU7dAk00", // $10
-      2500: "https://buy.stripe.com/test_00w7sE2J32g79qH8nBdAk02", // $25
-      5000: "https://buy.stripe.com/test_28E4gsfvP8Ev1YffQ3dAk03", // $50
+      500: process.env.STRIPE_LINK_5 || "",
+      1000: process.env.STRIPE_LINK_10 || "",
+      2500: process.env.STRIPE_LINK_25 || "",
+      5000: process.env.STRIPE_LINK_50 || "",
     };
 
     const sessionData = {

@@ -131,8 +131,8 @@ export function BalanceDisplay({ userId }: BalanceDisplayProps) {
                 </div>
                 {!balance.firstPaidTopupApplied && topupAmount > 0 && (
                   <div className="text-sm text-blue-600">
-                    You'll get a {Math.min(Math.round(topupAmount * 0.2), 500)}¢
-                    bonus on your first top-up!
+                    You'll get a {Math.min(Math.round(topupAmount * 0.05), 500)}
+                    ¢ bonus on your first top-up!
                   </div>
                 )}
               </div>

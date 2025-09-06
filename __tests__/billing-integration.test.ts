@@ -268,7 +268,7 @@ describe("Billing System Integration Tests", () => {
 
       // Test case: 1000 tokens at $0.00002/token (2000 micro-cents per token)
       const providerCostMicro = computeProviderCostMicro(1000, 2000);
-      const feeMicro = computeFeeMicro(providerCostMicro, 1400); // 14% = 1400 bps
+      const feeMicro = computeFeeMicro(providerCostMicro, 500); // 5% = 500 bps
       const totalMicro = providerCostMicro + feeMicro;
 
       // provider cost should be 2 cents -> 2 * MICRO

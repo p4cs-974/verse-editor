@@ -4,21 +4,39 @@ import Stripe from "stripe";
 import { ConvexHttpClient } from "convex/browser";
 import { api, internal } from "@/convex/_generated/api";
 
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error("STRIPE_SECRET_KEY is not configured");
+}
+if (!process.env.NEXT_PUBLIC_CONVEX_URL) {
+  throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+}
+if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  throw new Error("STRIPE_WEBHOOK_SECRET is not configured");
+}
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const headersList = await headers();
-  const sig = headersList.get("stripe-signature")!;
+  // Replace non-null assertion with a safe lookup
+  const sig = headersList.get("stripe-signature");
+
+  if (!sig) {
+    console.error("Missing stripe-signature header");
+    return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+  }
 
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(body, sig, endpointSecret);
+    event = await stripe.webhooks.constructEventAsync(
+      body,
+      sig,
+      endpointSecret
+    );
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
@@ -52,11 +70,11 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      case "invoice.payment_succeeded": {
-        const invoice = event.data.object as Stripe.Invoice;
-        await handleInvoicePayment(invoice);
-        break;
-      }
+      // case "invoice.payment_succeeded": {
+      //   const invoice = event.data.object as Stripe.Invoice;
+      //   await handleInvoicePayment(invoice);
+      //   break;
+      // }
 
       default:
         console.log(`Unhandled event type: ${event.type}`);
@@ -190,6 +208,16 @@ async function handleDispute(dispute: Stripe.Dispute) {
         });
       }
     }
+    const customer = await stripe.customers.retrieve(customerId);
+
+    if ("deleted" in customer && customer.deleted) {
+      console.log("Invoice payment for deleted customer");
+      return;
+    }
+
+    const userId = !("deleted" in customer)
+      ? customer.metadata?.userId
+      : undefined;
   } catch (error) {
     console.error("Error handling dispute:", error);
   }
@@ -198,28 +226,28 @@ async function handleDispute(dispute: Stripe.Dispute) {
 /**
  * Handle successful invoice payments (for subscriptions if implemented)
  */
-async function handleInvoicePayment(invoice: Stripe.Invoice) {
-  const customerId = invoice.customer as string;
+// async function handleInvoicePayment(invoice: Stripe.Invoice) {
+//   const customerId = invoice.customer as string;
 
-  try {
-    const customer = await stripe.customers.retrieve(customerId);
+//   try {
+//     const customer = await stripe.customers.retrieve(customerId);
 
-    if (customer.deleted) {
-      console.log("Invoice payment for deleted customer");
-      return;
-    }
+//     if (customer.deleted) {
+//       console.log("Invoice payment for deleted customer");
+//       return;
+//     }
 
-    const userId = customer.metadata?.userId;
+//     const userId = customer.metadata?.userId;
 
-    if (userId) {
-      console.log(
-        `Invoice payment succeeded for user ${userId}, amount: ${invoice.amount_paid}`
-      );
+//     if (userId) {
+//       console.log(
+//         `Invoice payment succeeded for user ${userId}, amount: ${invoice.amount_paid}`
+//       );
 
-      // Handle recurring subscription payments here if needed
-      // This might credit the user's account or extend their subscription
-    }
-  } catch (error) {
-    console.error("Error handling invoice payment:", error);
-  }
-}
+//       // Handle recurring subscription payments here if needed
+//       // This might credit the user's account or extend their subscription
+//     }
+//   } catch (error) {
+//     console.error("Error handling invoice payment:", error);
+//   }
+// }}
