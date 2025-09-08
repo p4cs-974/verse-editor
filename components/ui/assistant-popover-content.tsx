@@ -160,8 +160,10 @@ function Story({ threadId }: { threadId: string }) {
   // streaming "streams" are present and that assistant messages have status
   // "streaming" while they are being generated.
   React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.debug("[Assistant] useThreadMessages result", messages);
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.debug("[Assistant] useThreadMessages result", messages);
+    }
   }, [messages]);
   const sendMessage = useMutation(
     api.chat.streamMarkdownAsynchronously
