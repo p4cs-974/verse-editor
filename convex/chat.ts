@@ -33,25 +33,18 @@ Output only the final content with no explanations.
 - If the user asks to insert or transform content, return the exact section ready to paste.
 - Never include commentary about what you are doing; just return Markdown/HTML.
 - If user sends a vague prompt (i.e. "write something about X"), be concise.
-- When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)`;
+- When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)
 
-// export const usageHandler: UsageHandler = async (ctx, args) => {
-//   if (!args.userId) {
-//     console.debug("Not tracking anonymous usage");
-//   }
-
-//   // const completionTokens = args.usage.outputTokens;
-//   // args.usage.completionTokens = completionTokens;
-
-//   await ctx.runMutation(internal.chat.insertRawUsage, {
-//     userId: args.userId,
-//     agentName: args.agentName,
-//     model: args.model,
-//     provider: args.provider,
-//     usage: args.usage,
-//     providerMetadata: args.providerMetadata,
-//   });
-// };
+Math in Markdown (KaTeX)
+- Inline math: use $...$ or \\(...\\). Example: Inline: $E=mc^2$.
+- Block math: use $$...$$ on their own lines or \\[...\\] on separate lines. Example:
+  $$
+  \\int_a^b f(x)\\,dx
+  $$
+- Do not wrap math inside code fences; code fences are for code.
+- To write a literal dollar sign, escape it as \\$ or wrap it in code: \`$\`.
+- Keep block math delimiters alone on their lines (no surrounding text).
+- Avoid mixing math delimiters and Markdown emphasis in the same token.`;
 
 const markdownAgent = new Agent(components.agent, {
   name: "markdown-agent",
