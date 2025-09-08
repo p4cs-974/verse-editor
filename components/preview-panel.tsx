@@ -223,7 +223,7 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
           const { svg } = await mermaid.render(id, source);
           if (cancelled) return;
           // Replace the placeholder block with the rendered SVG.
-          const wrapper = document.createElement('div');
+          const wrapper = document.createElement("div");
           wrapper.innerHTML = svg;
           const svgElement = wrapper.firstElementChild;
           if (svgElement) {
@@ -243,7 +243,7 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
     return () => {
       cancelled = true;
       // Clean up created elements if needed
-      createdElements.forEach(el => el.remove());
+      createdElements.forEach((el) => el.remove());
     };
   }, [html]);
 
@@ -258,15 +258,8 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
       try {
         const mod = await import("katex/contrib/auto-render");
         if (cancelled) return;
-        const renderMathInElement =
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(
-              "[preview-panel] KaTeX auto-render not a function:",
-              typeof renderMathInElement
-            );
-          }
-          return;
-          );
+        const renderMathInElement = mod.default;
+        if (typeof renderMathInElement !== "function") {
           return;
         }
         // Wrap KaTeX debug logs in development-only checks
@@ -282,16 +275,7 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
           ],
           throwOnError: false,
           strict: "ignore",
-          ignoredTags: [
-            "script",
-            "noscript",
-            "style",
-            "textarea",
-        if (process.env.NODE_ENV === 'development') {
-          console.warn("[preview-panel] KaTeX auto-render error", e);
-        }
-      }
-          ],
+          ignoredTags: ["script", "noscript", "style", "textarea"],
           ignoredClasses: ["mermaid"],
         });
         if (process.env.NODE_ENV === "development") {
