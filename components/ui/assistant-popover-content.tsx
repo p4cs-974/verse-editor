@@ -153,16 +153,16 @@ function Story({ threadId }: { threadId: string }) {
   const messages = useThreadMessages(
     api.chat.listMarkdownThreadMessages,
     { threadId },
-    { initialNumItems: 10, stream: true }
+    { initialNumItems: 100, stream: true }
   );
 
   // Debugging: inspect the messages object returned by the hook to ensure the
   // streaming "streams" are present and that assistant messages have status
   // "streaming" while they are being generated.
-  // React.useEffect(() => {
-  //   // eslint-disable-next-line no-console
-  //   console.debug("[Assistant] useThreadMessages result", messages);
-  // }, [messages]);
+  React.useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.debug("[Assistant] useThreadMessages result", messages);
+  }, [messages]);
   const sendMessage = useMutation(
     api.chat.streamMarkdownAsynchronously
   ).withOptimisticUpdate(
@@ -181,7 +181,45 @@ function Story({ threadId }: { threadId: string }) {
   }, []);
 
   // Convert server results into UI messages and only keep assistant messages
-  const rawResults = messages.results ?? [];
+  // `messages` returned by useThreadMessages includes paginated.results and a
+  // `streams` object. On some runs the stream deltas arrive via `streams`
+  // without an immediately updated paginated snapshot; ensure we merge them
+  // so the UI sees streaming text even when paginated page is empty.
+  const paginatedResults = (messages as any).results ?? [];
+  const streamResults = (messages as any).streams?.streams ?? [];
+  // Merge paginated results and active streams by concatenating and deduping by _id.
+  const mergedById: Record<string, any> = {};
+  for (const r of paginatedResults) {
+    if (r && r._id) mergedById[r._id] = r;
+  }
+  for (const s of streamResults) {
+    if (!s) continue;
+    // Streams typically have an `_id` matching the originating message or a stream id;
+    // prefer keeping an existing paginated document and augment it with stream fields.
+    const id =
+      s._id ??
+      s.streamId ??
+      `${s.threadId}-stream-${s.streamId ?? Math.random()}`;
+    const existing = mergedById[id] ?? {};
+    mergedById[id] = {
+      ...existing,
+      ...s,
+      // Ensure we keep the canonical fields from existing if present.
+      _id: existing._id ?? id,
+      threadId: existing.threadId ?? s.threadId,
+      order: existing.order ?? s.order,
+      stepOrder: existing.stepOrder ?? s.stepOrder,
+      message: existing.message ?? s.message,
+      text: (existing.text ?? "") + (s.text ?? ""),
+      streaming: s.streaming ?? existing.streaming ?? true,
+      status: s.streaming ? "streaming" : existing.status ?? s.status,
+    };
+  }
+  const rawResults = Object.values(mergedById).sort((a: any, b: any) => {
+    const aKey = (a.order ?? 0) * 100000 + (a.stepOrder ?? 0);
+    const bKey = (b.order ?? 0) * 100000 + (b.stepOrder ?? 0);
+    return aKey - bKey;
+  });
 
   // Detect if any incoming result is still streaming so we prefer live data while streaming.
   const hasStreaming = React.useMemo(
