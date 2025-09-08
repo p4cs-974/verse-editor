@@ -441,7 +441,6 @@ export default function AssistantPopoverContent({
       {/* Header with title, balance, and add balance button */}
       <div className="flex items-center justify-between mb-4 pb-3 border-b">
         <div className="flex items-center gap-2">
-          <h3 className="font-semibold">Assistant</h3>
           <BalanceDisplay />
         </div>
         <AddBalanceButton />
