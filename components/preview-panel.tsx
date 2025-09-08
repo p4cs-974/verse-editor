@@ -26,6 +26,16 @@ interface PreviewPanelProps {
 // Configure marked
 const renderer = new marked.Renderer();
 
+/**
+ * Escape HTML special characters in a string.
+ *
+ * Converts &, <, >, " and ' to their corresponding HTML entities so the
+ * returned string can be safely embedded into HTML content (e.g., inside
+ * a <pre> or text node) without being interpreted as markup.
+ *
+ * @param str - The input text to escape.
+ * @returns The escaped string with HTML special characters replaced by entities.
+ */
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -75,6 +85,18 @@ if (process.env.NODE_ENV === "development") {
   console.debug("[preview-panel] marked-katex-extension registered");
 }
 
+/**
+ * Renders sanitized HTML preview of Markdown content with client-side Mermaid and KaTeX rendering.
+ *
+ * Generates HTML from the provided Markdown, sanitizes it with a DOMPurify instance that hardens links/images
+ * and blocks unsafe URL schemes, and injects the sanitized output into a managed container. Preserves existing
+ * <img> elements by src to avoid unnecessary reloads when content updates. After insertion, Mermaid code fences
+ * are rendered to SVG and KaTeX auto-rendering is applied for remaining math expressions.
+ *
+ * The component also injects optional document CSS from the `doc` prop.
+ *
+ * @returns A React element containing the live preview.
+ */
 function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const purifier = useMemo<DOMPurify>(() => {
     const p = createDOMPurify(window);

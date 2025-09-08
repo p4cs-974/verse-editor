@@ -147,7 +147,21 @@ function Message({ message }: { message: UIMessage }) {
 //       </div>
 //     </div>
 //   );
-// }
+/**
+ * Renders the assistant thread UI for a given threadId: input prompt, send flow,
+ * streaming assistant messages, copy-to-clipboard, and pagination.
+ *
+ * This component subscribes to server paginated results and streaming deltas,
+ * merges them into a single timeline (preserving streaming text as it arrives),
+ * prefers live streaming data while generation is in progress, and falls back to
+ * a cached snapshot once streaming finishes. It also provides an input area
+ * with optimistic send, per-thread caching of finalized message snapshots, and
+ * controls to copy the currently visible assistant message and navigate between
+ * assistant responses.
+ *
+ * @param threadId - Identifier of the conversation thread to display and interact with.
+ * @returns The Story component's JSX element.
+ */
 
 function Story({ threadId }: { threadId: string }) {
   const messages = useThreadMessages(
@@ -433,6 +447,15 @@ function Story({ threadId }: { threadId: string }) {
   );
 }
 
+/**
+ * Popover content that displays balance controls and the thread conversation.
+ *
+ * Renders a header with BalanceDisplay and AddBalanceButton. The main area shows the
+ * Story component for the given `threadId`. If `threadId` is not provided, a
+ * centered "Loading..." placeholder is shown.
+ *
+ * @param threadId - The thread identifier whose messages should be displayed.
+ */
 export default function AssistantPopoverContent({
   threadId,
 }: PopoverContentProps) {
