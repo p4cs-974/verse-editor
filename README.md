@@ -1,3 +1,5 @@
+[![License](https://img.shields.io/badge/License-NonCommercial-blue?style=flat-square)](LICENSE)
+
 <div align="center">
   <img src="public/logo.png" alt="Verse Editor Logo" width="200">
 </div>
