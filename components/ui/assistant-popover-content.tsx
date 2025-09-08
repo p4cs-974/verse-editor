@@ -91,10 +91,19 @@ interface PopoverContentProps {
   threadId: string;
 }
 
-function Message({ message }: { message: UIMessage }) {
-  // visibleText animates incoming text; default to the final text when not streaming.
+function Message({
+  message,
+  startStreaming,
+}: {
+  message: UIMessage;
+  startStreaming?: boolean;
+}) {
+  // Determine whether we should kick off smooth streaming for this message.
+  const effectiveStartStreaming =
+    startStreaming ?? message.status === "streaming";
+
   const [visibleText] = useSmoothText(message.text, {
-    startStreaming: message.status === "streaming",
+    startStreaming: effectiveStartStreaming,
   });
 
   const isAssistantMsg = message.role === "assistant";
@@ -103,20 +112,26 @@ function Message({ message }: { message: UIMessage }) {
 
   if (!isAssistantMsg) return null;
 
+  // Fallback: if useSmoothText has not produced any visibleText yet (e.g. single-chunk
+  // "success" responses that don't emit deltas), render the final message.text so the
+  // user can see short responses immediately. For streaming cases, visibleText will
+  // populate and be preferred.
+  const displayText = visibleText || message.text;
+
   React.useEffect(() => {
     const view = editorRef.current;
     if (!view) return;
-    const changes = { from: 0, to: view.state.doc.length, insert: visibleText };
+    const changes = { from: 0, to: view.state.doc.length, insert: displayText };
     view.dispatch(view.state.update({ changes }));
-  }, [visibleText]);
+  }, [displayText, editorRef.current]);
 
   return (
-    // <p>{visibleText}</p>
+    // <p>{displayText}</p>
     <CodeMirror
       onCreateEditor={(view) => {
         editorRef.current = view;
       }}
-      value={visibleText}
+      value={displayText}
       height="372px"
       extensions={[markdown(), EditorView.lineWrapping]}
       editable={false}
@@ -203,6 +218,9 @@ function Story({ threadId }: { threadId: string }) {
       s.streamId ??
       `${s.threadId}-stream-${s.streamId ?? Math.random()}`;
     const existing = mergedById[id] ?? {};
+    const computedStatus = s.streaming
+      ? "streaming"
+      : existing.status ?? s.status;
     mergedById[id] = {
       ...existing,
       ...s,
@@ -214,7 +232,7 @@ function Story({ threadId }: { threadId: string }) {
       message: existing.message ?? s.message,
       text: (existing.text ?? "") + (s.text ?? ""),
       streaming: s.streaming ?? existing.streaming ?? true,
-      status: s.streaming ? "streaming" : existing.status ?? s.status,
+      status: computedStatus,
     };
   }
   const rawResults = Object.values(mergedById).sort((a: any, b: any) => {
@@ -383,16 +401,24 @@ function Story({ threadId }: { threadId: string }) {
       {assistantMessages.length > 0 ? (
         <div className="flex flex-col gap-3">
           <div className="border rounded-md overflow-hidden bg-neutral-950">
-            {assistantMessages.map((msg, idx) => (
-              <div
-                key={msg.key}
-                // keep all Message components mounted so streaming continues,
-                // but only show the active one visually.
-                className={idx === currentIndex ? "" : "hidden"}
-              >
-                <Message message={msg} />
-              </div>
-            ))}
+            {assistantMessages.map((msg, idx) => {
+              const startStreamingForThis =
+                idx === currentIndex &&
+                (msg.status === "streaming" || msg.status === "success");
+              return (
+                <div
+                  key={msg.key}
+                  // keep all Message components mounted so streaming continues,
+                  // but only show the active one visually.
+                  className={idx === currentIndex ? "" : "hidden"}
+                >
+                  <Message
+                    message={msg}
+                    startStreaming={startStreamingForThis}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <Pagination className="mt-2">
