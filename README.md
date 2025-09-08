@@ -35,3 +35,35 @@ There should be a simpler way to convert markdown into documents, and Verse is a
 - Markdown snippets insertion via a toolbar button.
 - AI features to help with writing and styling.
 - Support for extended markdown
+
+## Extended Markdown Support
+
+The preview now supports:
+
+- GitHub Flavored Markdown (GFM)
+- LaTeX math via KaTeX (inline and display)
+- Mermaid.js diagrams
+
+Examples:
+
+- Inline math: `$E=mc^2$`
+
+- Display math:
+
+  $$
+  \int_a^b f(x)\,dx
+  $$
+
+- Mermaid diagram:
+  ```mermaid
+  graph TD
+    A[Start] --> B{Choice}
+    B -->|Yes| C[Path 1]
+    B -->|No|  D[Path 2]
+  ```
+
+Notes:
+
+- Math is rendered with KaTeX and styled automatically.
+- Mermaid diagrams are rendered client‑side from sanitized HTML. Use triple backticks with the language set to `mermaid`.
+- If you need a literal dollar sign in text, escape it like `\$` to avoid triggering inline math.

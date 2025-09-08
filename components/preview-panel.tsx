@@ -4,6 +4,8 @@
 import { marked } from "marked";
 import createDOMPurify, { type DOMPurify } from "dompurify";
 import { useMemo, useId, memo, useRef, useEffect } from "react";
+import markedKatex from "marked-katex-extension";
+import katex from "katex";
 
 /**
  * Preview renderer for editor documents using marked + DOMPurify.
@@ -22,10 +24,56 @@ interface PreviewPanelProps {
 }
 
 // Configure marked
+const renderer = new marked.Renderer();
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Custom code renderer:
+// - For ```mermaid fences, emit a <pre class="mermaid"> with escaped text content.
+// - For other languages, fall back to a simple code block (no syntax highlighting).
+(renderer as any).code = ({
+  text,
+  lang,
+}: {
+  text: string;
+  lang?: string;
+}): string => {
+  const language = (lang || "").trim().split(/\s+/)[0].toLowerCase();
+  if (language === "mermaid") {
+    // Will be converted to SVG by Mermaid after sanitized HTML insertion
+    return `<pre class="mermaid">${escapeHtml(text)}</pre>\n`;
+  }
+  const classAttr = language ? ` class="language-${escapeHtml(language)}"` : "";
+  return `<pre><code${classAttr}>${escapeHtml(text)}</code></pre>\n`;
+};
+
 marked.setOptions({
   gfm: true,
   breaks: true,
+  renderer,
 });
+
+// Register KaTeX extension for inline $...$ and block $$...$$ math.
+// Keep errors non-throwing and output as HTML for DOMPurify to sanitize.
+marked.use(
+  // Cast as any to accommodate types across marked/extension versions.
+  (markedKatex as any)({
+    throwOnError: false,
+    output: "html", // avoid MathML to reduce sanitize friction
+    katex, // explicitly pass the KaTeX instance
+  }) as any
+);
+// Debug registration to verify plugin is active during dev
+if (process.env.NODE_ENV === "development") {
+  console.debug("[preview-panel] marked-katex-extension registered");
+}
 
 function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const purifier = useMemo<DOMPurify>(() => {
@@ -150,6 +198,97 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
       if (s) updated[s] = img;
     }
     prevImagesRef.current = updated;
+  }, [html]);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let cancelled = false;
+    const createdElements: Element[] = [];
+
+    const run = async () => {
+      const blocks = Array.from(
+        container.querySelectorAll<HTMLElement>(".mermaid")
+      );
+      if (blocks.length === 0) return;
+
+      const mermaid = (await import("mermaid")).default;
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+
+      let idx = 0;
+      for (const el of blocks) {
+        const source = el.textContent ?? "";
+        const id = `mermaid-${Date.now()}-${idx++}`;
+        try {
+          const { svg } = await mermaid.render(id, source);
+          if (cancelled) return;
+          // Replace the placeholder block with the rendered SVG.
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = svg;
+          const svgElement = wrapper.firstElementChild;
+          if (svgElement) {
+            el.replaceWith(svgElement);
+            createdElements.push(svgElement);
+          }
+        } catch {
+          // Leave original block if rendering fails.
+        }
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      void run();
+    }
+
+    return () => {
+      cancelled = true;
+      // Clean up created elements if needed
+      createdElements.forEach((el) => el.remove());
+    };
+  }, [html]);
+
+  // After sanitized HTML is inserted, attempt client-side KaTeX auto-render.
+  // This complements marked-katex-extension and avoids double processing if it already ran.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import("katex/contrib/auto-render");
+        if (cancelled) return;
+        const renderMathInElement = mod.default;
+        if (typeof renderMathInElement !== "function") {
+          return;
+        }
+        // Wrap KaTeX debug logs in development-only checks
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[preview-panel] KaTeX auto-render start");
+        }
+        renderMathInElement(container, {
+          delimiters: [
+            { left: "$", right: "$", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true },
+          ],
+          throwOnError: false,
+          strict: "ignore",
+          ignoredTags: ["script", "noscript", "style", "textarea"],
+          ignoredClasses: ["mermaid"],
+        });
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[preview-panel] KaTeX auto-render done");
+        }
+      } catch (e) {
+        console.warn("[preview-panel] KaTeX auto-render error", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [html]);
 
   return (

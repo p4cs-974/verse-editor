@@ -33,25 +33,18 @@ Output only the final content with no explanations.
 - If the user asks to insert or transform content, return the exact section ready to paste.
 - Never include commentary about what you are doing; just return Markdown/HTML.
 - If user sends a vague prompt (i.e. "write something about X"), be concise.
-- When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)`;
+- When using the browser tool and referencing info from it, add links to the websites you got the data from, like this: [Reference #](url)
 
-// export const usageHandler: UsageHandler = async (ctx, args) => {
-//   if (!args.userId) {
-//     console.debug("Not tracking anonymous usage");
-//   }
-
-//   // const completionTokens = args.usage.outputTokens;
-//   // args.usage.completionTokens = completionTokens;
-
-//   await ctx.runMutation(internal.chat.insertRawUsage, {
-//     userId: args.userId,
-//     agentName: args.agentName,
-//     model: args.model,
-//     provider: args.provider,
-//     usage: args.usage,
-//     providerMetadata: args.providerMetadata,
-//   });
-// };
+Math in Markdown (KaTeX)
+- Inline math: use $...$ or \\(...\\). Example: Inline: $E=mc^2$.
+- Block math: use $$...$$ on their own lines or \\[...\\] on separate lines. Example:
+  $$
+  \\int_a^b f(x)\\,dx
+  $$
+- Do not wrap math inside code fences; code fences are for code.
+- To write a literal dollar sign, escape it as \\$ or wrap it in code: \`$\`.
+- Keep block math delimiters alone on their lines (no surrounding text).
+- Avoid mixing math delimiters and Markdown emphasis in the same token.`;
 
 const markdownAgent = new Agent(components.agent, {
   name: "markdown-agent",
@@ -320,7 +313,47 @@ export const sendWritingPrompt = action({
       { saveStreamDeltas: { chunking: "word" } }
     );
 
-    await result.consumeStream();
+    // Diagnostic: announce consumeStream start for this run
+    console.debug("sendWritingPrompt: about to consumeStream", {
+      threadId: args.threadId,
+      promptPreview: args.prompt?.slice?.(0, 200) ?? "[no prompt]",
+    });
+
+    try {
+      await result.consumeStream();
+
+      // Post-consume verification: ensure messages were persisted for this thread.
+      try {
+        const { page } = await markdownAgent.listMessages(ctx, {
+          threadId: args.threadId,
+          paginationOpts: { cursor: null, numItems: 5 },
+          excludeToolMessages: true,
+        });
+        console.debug("sendWritingPrompt: after consumeStream listMessages", {
+          threadId: args.threadId,
+          numMessages: Array.isArray(page) ? page.length : 0,
+          sampleIds: Array.isArray(page)
+            ? page.slice(0, 3).map((m: any) => m._id)
+            : [],
+        });
+      } catch (listErr) {
+        console.error(
+          "sendWritingPrompt: listMessages after consumeStream failed",
+          {
+            threadId: args.threadId,
+            error: listErr,
+          }
+        );
+      }
+
+      return;
+    } catch (err) {
+      console.error("sendWritingPrompt: consumeStream failed", {
+        threadId: args.threadId,
+        error: err,
+      });
+      throw err;
+    }
   },
 });
 
@@ -329,13 +362,99 @@ export const streamMarkdown = internalAction({
   handler: async (ctx, { promptMessageId, threadId }) => {
     const { thread } = await markdownAgent.continueThread(ctx, { threadId });
 
+    if (process.env.NODE_ENV === "development") {
+      console.debug("streamMarkdown: starting streamText", {
+        promptMessageId,
+        threadId,
+      });
+    }
+
     const result = await thread.streamText(
       { promptMessageId },
       { saveStreamDeltas: true }
       // { saveStreamDeltas: { chunking: "word" } }
     );
 
-    await result.consumeStream();
+    let lastError;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.debug("streamMarkdown: about to consumeStream", {
+          promptMessageId,
+          threadId,
+          attempt,
+        });
+
+        await result.consumeStream();
+
+        // Post-consume verification: ensure messages were persisted for this thread.
+        try {
+          const { page } = await markdownAgent.listMessages(ctx, {
+            threadId,
+            paginationOpts: { cursor: null, numItems: 5 },
+            excludeToolMessages: true,
+          });
+          console.debug("streamMarkdown: after consumeStream listMessages", {
+            threadId,
+            promptMessageId,
+            attempt,
+            numMessages: Array.isArray(page) ? page.length : 0,
+            sampleIds: Array.isArray(page)
+              ? page.slice(0, 3).map((m: any) => m._id)
+              : [],
+          });
+        } catch (listErr) {
+          console.error(
+            "streamMarkdown: listMessages after consumeStream failed",
+            {
+              threadId,
+              promptMessageId,
+              attempt,
+              error: listErr,
+            }
+          );
+        }
+
+        console.debug("streamMarkdown: consumeStream succeeded", {
+          promptMessageId,
+          threadId,
+          attempt,
+        });
+        return; // Success, exit
+      } catch (error) {
+        lastError = error;
+        console.error(`Stream attempt ${attempt} failed:`, error, {
+          promptMessageId,
+          threadId,
+        });
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt - 1) * 100; // 100, 200, 400 ms
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // If all retries failed
+    console.error("Stream failed after all retries:", lastError, {
+      promptMessageId,
+      threadId,
+    });
+
+    // Insert fallback message
+    try {
+      const fallback = await markdownAgent.saveMessage(ctx, {
+        threadId,
+        prompt:
+          "Sorry, I encountered an error generating the response. Please try again.",
+        skipEmbeddings: true,
+      });
+      console.debug("streamMarkdown: inserted fallback message", {
+        threadId,
+        fallbackId: (fallback as any)?.messageId ?? fallback,
+      });
+    } catch (fallbackError) {
+      console.error("Failed to insert fallback message:", fallbackError);
+    }
   },
 });
 
