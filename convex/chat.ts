@@ -362,10 +362,12 @@ export const streamMarkdown = internalAction({
   handler: async (ctx, { promptMessageId, threadId }) => {
     const { thread } = await markdownAgent.continueThread(ctx, { threadId });
 
-    console.debug("streamMarkdown: starting streamText", {
-      promptMessageId,
-      threadId,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.debug("streamMarkdown: starting streamText", {
+        promptMessageId,
+        threadId,
+      });
+    }
 
     const result = await thread.streamText(
       { promptMessageId },

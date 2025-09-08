@@ -71,7 +71,9 @@ marked.use(
   }) as any
 );
 // Debug registration to verify plugin is active during dev
-console.debug("[preview-panel] marked-katex-extension registered");
+if (process.env.NODE_ENV === "development") {
+  console.debug("[preview-panel] marked-katex-extension registered");
+}
 
 function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const purifier = useMemo<DOMPurify>(() => {
@@ -197,13 +199,12 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
     }
     prevImagesRef.current = updated;
   }, [html]);
-
-  // After sanitized HTML is inserted, render Mermaid diagrams client-side.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let cancelled = false;
+    const createdElements: Element[] = [];
 
     const run = async () => {
       const blocks = Array.from(
@@ -222,7 +223,13 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
           const { svg } = await mermaid.render(id, source);
           if (cancelled) return;
           // Replace the placeholder block with the rendered SVG.
-          el.outerHTML = svg;
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = svg;
+          const svgElement = wrapper.firstElementChild;
+          if (svgElement) {
+            el.replaceWith(svgElement);
+            createdElements.push(svgElement);
+          }
         } catch {
           // Leave original block if rendering fails.
         }
@@ -235,6 +242,8 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
 
     return () => {
       cancelled = true;
+      // Clean up created elements if needed
+      createdElements.forEach(el => el.remove());
     };
   }, [html]);
 
@@ -250,18 +259,23 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
         const mod = await import("katex/contrib/auto-render");
         if (cancelled) return;
         const renderMathInElement =
-          (mod as any).default ?? (mod as any).renderMathInElement;
-        if (typeof renderMathInElement !== "function") {
-          console.warn(
-            "[preview-panel] KaTeX auto-render not a function:",
-            typeof renderMathInElement
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(
+              "[preview-panel] KaTeX auto-render not a function:",
+              typeof renderMathInElement
+            );
+          }
+          return;
           );
           return;
         }
-        console.debug("[preview-panel] KaTeX auto-render start");
+        // Wrap KaTeX debug logs in development-only checks
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[preview-panel] KaTeX auto-render start");
+        }
         renderMathInElement(container, {
           delimiters: [
-            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: true },
             { left: "$", right: "$", display: false },
             { left: "\\(", right: "\\)", display: false },
             { left: "\\[", right: "\\]", display: true },
@@ -273,12 +287,16 @@ function PreviewPanel({ doc, content }: PreviewPanelProps) {
             "noscript",
             "style",
             "textarea",
-            "pre",
-            "code",
+        if (process.env.NODE_ENV === 'development') {
+          console.warn("[preview-panel] KaTeX auto-render error", e);
+        }
+      }
           ],
           ignoredClasses: ["mermaid"],
         });
-        console.debug("[preview-panel] KaTeX auto-render done");
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[preview-panel] KaTeX auto-render done");
+        }
       } catch (e) {
         console.warn("[preview-panel] KaTeX auto-render error", e);
       }
