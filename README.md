@@ -5,7 +5,7 @@
 </div>
 
 <div align="center">
-  <h1>Verse Web App</h1>
+  <h1>Verse Editor</h1>
 </div>
 
 <div align="center">

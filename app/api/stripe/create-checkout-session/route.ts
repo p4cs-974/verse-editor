@@ -36,10 +36,10 @@ export async function POST(request: NextRequest) {
 
     // Map to existing Stripe price IDs (kept in sync with Convex pricing map)
     const priceMap: Record<number, string> = {
-      500: "price_1S43f14QJxtRRVlaZrCQLtBd", // $5
-      1000: "price_1S43a34QJxtRRVlacOMS5vFh", // $10
-      2500: "price_1S43fZ4QJxtRRVlayUqIwgTI", // $25
-      5000: "price_1S43gq4QJxtRRVlalmT8ByfC", // $50
+      500: process.env.NEXT_PUBLIC_STRIPE_PRICE_5 || "", // $5
+      1000: process.env.NEXT_PUBLIC_STRIPE_PRICE_10 || "", // $10
+      2500: process.env.NEXT_PUBLIC_STRIPE_PRICE_25 || "", // $25
+      5000: process.env.NEXT_PUBLIC_STRIPE_PRICE_50 || "", // $50
     };
 
     const priceId = priceMap[amountCents];
