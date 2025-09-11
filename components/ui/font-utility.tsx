@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useAction, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { useAuth } from "@clerk/nextjs"; // Assuming Clerk for user identity
 
 import {
@@ -50,13 +50,16 @@ export default function FontUtility({
   const [selectedFamily, setSelectedFamily] = useState(""); // For import prompt
 
   // Get user ID from Clerk if not provided
-  const { getToken } = useAuth();
-  const currentUserId = userId || ""; // Implement getToken if needed for auth
+  // Get user ID from Clerk if not provided
+  const { userId: authUserId } = useAuth();
+  const currentUserId = userId ?? authUserId ?? null;
 
   // Fetch imported fonts
   const importedFonts =
-    useQuery(api.fonts.listUserFonts, { userId: currentUserId ?? "" }) ?? [];
-
+    useQuery(
+      api.fonts.listUserFonts,
+      currentUserId ? { userId: currentUserId } : "skip"
+    ) ?? [];
   // Mutation to add a font for the user
   const addUserFont = useMutation(api.fonts.addUserFont);
 
@@ -134,6 +137,7 @@ export default function FontUtility({
           userId: currentUserId,
           family: selectedFamily,
         });
+        handleSelect(selectedFamily); // applies and closes
         setShowImport(false);
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -172,10 +176,15 @@ export default function FontUtility({
                   key={option.family}
                   value={option.family}
                   onSelect={() => {
-                    handleSelect(option.family);
-                    if (option.isGoogle) {
+                    // If this is a Google font (not already imported), open the import UI
+                    // and DO NOT close the popover yet. Only close the popover/select
+                    // after a successful import in handleImport.
+                    if (option.isGoogle && !option.isImported) {
                       setSelectedFamily(option.family);
                       setShowImport(true);
+                    } else {
+                      // For imported/local fonts just select and close immediately
+                      handleSelect(option.family);
                     }
                   }}
                 >

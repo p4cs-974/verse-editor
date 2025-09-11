@@ -286,27 +286,37 @@ export default function StylingPopoverContent({
             "Helvetica",
             "Times New Roman",
             "Courier New",
+            // Allow "Inter" to be imported from Google Fonts, so do not include it here
+            // "Inter",
             "Georgia",
             "Verdana",
             "Trebuchet MS",
             "Lucida Sans",
-            "Inter",
           ]);
+
+          // Only consider families that are not obvious system fonts
           const googleFamilies = Array.from(familySet).filter(
-            (f) =>
-              (!systemFonts.has(f) && f.includes(" ")) || !systemFonts.has(f)
+            (f) => !systemFonts.has(f)
           );
 
           const importLines: string[] = [];
           for (const family of googleFamilies) {
-            // Build Google Fonts import URL-safe family string
-            const encoded = encodeURIComponent(family.replace(/\s+/g, "+"));
-            const importLine = `@import url('https://fonts.googleapis.com/css2?family=${encoded}&display=swap');`;
-            // Avoid duplicating imports or conflicting @font-face; removed family check as it blocks when in font-family rule
-            if (
-              !finalCss.includes(importLine) &&
-              !finalCss.includes(`@font-face`)
-            ) {
+            // Build a Google Fonts family token without double-encoding:
+            // encodeURIComponent the raw family name, then convert encoded spaces to '+'
+            // which is the expected separator in Google Fonts family tokens.
+            const token = encodeURIComponent(family).replace(/%20/g, "+");
+            const importLine = `@import url('https://fonts.googleapis.com/css2?family=${token}&display=swap');`;
+
+            // Avoid adding the import if that exact import line already exists
+            // or if there's an @font-face rule specifically for this family.
+            const fontFaceRe = new RegExp(
+              `@font-face[\\s\\S]*?font-family\\s*:\\s*['"]?${escapeForRegex(
+                family
+              )}['"]?`,
+              "i"
+            );
+
+            if (!finalCss.includes(importLine) && !fontFaceRe.test(finalCss)) {
               importLines.push(importLine);
             }
           }
@@ -327,10 +337,6 @@ export default function StylingPopoverContent({
         } catch (impErr) {
           console.warn("Failed to compute font imports", impErr);
         }
-
-        try {
-          localStorage.setItem(`${RAW_PREFIX}${documentId}`, finalCss);
-        } catch {}
         await updateDocument({ documentId, cssContent: finalCss });
       } catch (e) {
         console.warn("Failed to update document CSS", e);
