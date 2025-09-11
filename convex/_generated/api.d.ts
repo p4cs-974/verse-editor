@@ -13,6 +13,7 @@ import type * as balanceTest from "../balanceTest.js";
 import type * as billing from "../billing.js";
 import type * as chat from "../chat.js";
 import type * as documents from "../documents.js";
+import type * as fonts from "../fonts.js";
 import type * as http from "../http.js";
 import type * as stripe from "../stripe.js";
 import type * as userImages from "../userImages.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   billing: typeof billing;
   chat: typeof chat;
   documents: typeof documents;
+  fonts: typeof fonts;
   http: typeof http;
   stripe: typeof stripe;
   userImages: typeof userImages;

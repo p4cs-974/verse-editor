@@ -1,0 +1,238 @@
+"use client";
+
+import React, { useState, useMemo, useEffect } from "react";
+import { useQuery, useAction, useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { useAuth } from "@clerk/nextjs"; // Assuming Clerk for user identity
+
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Check, ChevronsUpDown, Plus } from "lucide-react";
+
+// Types
+type FontOption = {
+  family: string;
+  category?: string;
+  isImported?: boolean;
+  isGoogle?: boolean;
+};
+
+interface FontUtilityProps {
+  value?: string; // Current font-family value from CSS, e.g., "Inter, sans-serif"
+  onSelect?: (family: string) => void;
+  userId?: string; // Clerk user.subject
+  placeholder?: string;
+  buttonClassName?: string;
+}
+
+export default function FontUtility({
+  value = "",
+  onSelect,
+  userId,
+  placeholder = "Select font...",
+  buttonClassName = "",
+}: FontUtilityProps) {
+  const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [selectedFamily, setSelectedFamily] = useState(""); // For import prompt
+
+  // Get user ID from Clerk if not provided
+  const { getToken } = useAuth();
+  const currentUserId = userId || ""; // Implement getToken if needed for auth
+
+  // Fetch imported fonts
+  const importedFonts =
+    useQuery(api.fonts.listUserFonts, { userId: currentUserId ?? "" }) ?? [];
+
+  // Mutation to add a font for the user
+  const addUserFont = useMutation(api.fonts.addUserFont);
+
+  // Search Google Fonts on query change (debounce could be added)
+  const searchGoogleFonts = useAction(api.fonts.searchGoogleFonts);
+  const [googleFonts, setGoogleFonts] = useState<
+    { family: string; category?: string }[]
+  >([]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!searchQuery.trim()) {
+      setGoogleFonts([]);
+      return;
+    }
+
+    (async () => {
+      try {
+        const results = await searchGoogleFonts({
+          query: searchQuery,
+          limit: 5,
+        });
+        if (mounted && Array.isArray(results)) {
+          setGoogleFonts(results);
+        }
+      } catch (err) {
+        // Log and clear results on error
+        // The action may throw if API key is missing or network fails
+        // We intentionally swallow here and keep UI responsive
+        // Consider surface an error to the user in the future
+        // eslint-disable-next-line no-console
+        console.error("Error searching Google Fonts:", err);
+        if (mounted) setGoogleFonts([]);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [searchQuery, searchGoogleFonts]);
+
+  // Current selected display value
+  const selectedFamilyName = useMemo(() => {
+    // Parse value to get primary family, e.g., "Inter, sans-serif" -> "Inter"
+    return value.split(",")[0].trim().replace(/['"]/g, "");
+  }, [value]);
+
+  // All options: imported first, then search
+  const options: FontOption[] = useMemo(() => {
+    const imported = importedFonts.map((family) => ({
+      family,
+      isImported: true,
+    }));
+    const search = googleFonts.map((f) => ({ ...f, isGoogle: true }));
+    return [...imported, ...search];
+  }, [importedFonts, googleFonts]);
+
+  // Filter by searchQuery
+  const filteredOptions = useMemo(() => {
+    return options.filter((opt) =>
+      opt.family.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [options, searchQuery]);
+
+  const handleSelect = (family: string) => {
+    onSelect?.(family);
+    setOpen(false);
+    setSearchQuery("");
+  };
+
+  const handleImport = async () => {
+    if (selectedFamily && currentUserId) {
+      try {
+        await addUserFont({
+          userId: currentUserId,
+          family: selectedFamily,
+        });
+        setShowImport(false);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Error importing font:", err);
+      }
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={`w-[200px] justify-between ${buttonClassName}`}
+        >
+          <span style={{ fontFamily: `${selectedFamilyName}, sans-serif` }}>
+            {selectedFamilyName || "Select font"}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[200px] p-0">
+        <Command>
+          <CommandInput
+            placeholder={placeholder}
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+          />
+          <CommandList>
+            <CommandEmpty>No fonts found.</CommandEmpty>
+            <CommandGroup>
+              {filteredOptions.map((option) => (
+                <CommandItem
+                  key={option.family}
+                  value={option.family}
+                  onSelect={() => {
+                    handleSelect(option.family);
+                    if (option.isGoogle) {
+                      setSelectedFamily(option.family);
+                      setShowImport(true);
+                    }
+                  }}
+                >
+                  <Check
+                    className={`mr-2 h-4 w-4 ${
+                      option.family === selectedFamilyName
+                        ? "opacity-100"
+                        : "opacity-0"
+                    }`}
+                  />
+                  <span
+                    style={{
+                      fontFamily: `${option.family}, sans-serif`,
+                      fontSize: "14px",
+                      flex: 1,
+                    }}
+                  >
+                    {option.family}
+                  </span>
+                  {option.isGoogle && !option.isImported && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedFamily(option.family);
+                        setShowImport(true);
+                      }}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+        {showImport && (
+          <div className="p-2 border-t">
+            <p className="text-sm text-muted-foreground mb-2">
+              Import "{selectedFamily}" to your fonts?
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleImport}>
+                Import
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowImport(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}

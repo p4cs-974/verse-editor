@@ -5,6 +5,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { css } from "@codemirror/lang-css";
 import { Button } from "@/components/ui/button";
 import { TagCombobox, type TagOption } from "@/components/ui/combobox";
+import FontUtility from "./font-utility";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -17,6 +18,7 @@ const RAW_PREFIX = "md-editor:css-raw:";
 type CssMap = Record<string, string>;
 
 const DEFAULT_TAGS: TagOption[] = [
+  { value: "body", label: "Document body" },
   { value: "p", label: "Text (paragraph)" },
   { value: "h1", label: "Heading 1 (#)" },
   { value: "h2", label: "Heading 2 (##)" },
@@ -27,6 +29,8 @@ const DEFAULT_TAGS: TagOption[] = [
   { value: "ul, ol", label: "Lists (ul, ol)" },
   { value: "li", label: "List item (li)" },
   { value: "table", label: "Table" },
+  { value: "th", label: "Table header" },
+  { value: "td", label: "Table data" },
   { value: "blockquote", label: "Blockquote" },
 ];
 
@@ -154,6 +158,7 @@ export default function StylingPopoverContent({
 }) {
   const [tags] = useState<TagOption[]>(DEFAULT_TAGS);
   const [selected, setSelected] = useState<string>(tags[0]?.value || "p");
+  const [currentFontFamily, setCurrentFontFamily] = useState<string>("");
   const [cssMap, setCssMap] = useState<CssMap>({});
   const [value, setValue] = useState<string>("");
 
@@ -194,6 +199,10 @@ export default function StylingPopoverContent({
   useEffect(() => {
     const current = cssMap[selected] ?? defaultTemplateFor(selected);
     setValue(current);
+
+    // Parse current font-family from value
+    const fontMatch = current.match(/font-family:\s*([^;]+);/i);
+    setCurrentFontFamily(fontMatch ? fontMatch[1].trim() : "");
   }, [selected, cssMap]);
 
   useEffect(() => {
@@ -238,7 +247,86 @@ export default function StylingPopoverContent({
           baseStripped.trim(),
           aggregated.trim(),
         ].filter(Boolean);
-        const finalCss = parts.join("\n\n");
+        let finalCss = parts.join("\n\n");
+
+        // Detect font-family declarations in the managed blocks and ensure Google Fonts @import lines
+        try {
+          console.log("Computing font imports for CSS update");
+          const familySet = new Set<string>();
+          for (const block of Object.values(next)) {
+            if (!block) continue;
+            const matches = block.match(/font-family:\s*([^;]+);/gi);
+            if (!matches) continue;
+            for (const m of matches) {
+              const valMatch = /font-family:\s*([^;]+);/i.exec(m);
+              if (!valMatch) continue;
+              const rawVal = valMatch[1].trim();
+              const primary = rawVal.split(",")[0].trim().replace(/['"]/g, "");
+              if (primary) familySet.add(primary);
+            }
+          }
+
+          // Also check any remaining font-family declarations already in baseStripped
+          const extraMatches = baseStripped.match(/font-family:\s*([^;]+);/gi);
+          if (extraMatches) {
+            for (const m of extraMatches) {
+              const valMatch = /font-family:\s*([^;]+);/i.exec(m);
+              if (!valMatch) continue;
+              const rawVal = valMatch[1].trim();
+              const primary = rawVal.split(",")[0].trim().replace(/['"]/g, "");
+              if (primary) familySet.add(primary);
+            }
+          }
+
+          console.log("Detected font families:", Array.from(familySet));
+
+          // Filter out obvious system fonts that don't need import
+          const systemFonts = new Set([
+            "Arial",
+            "Helvetica",
+            "Times New Roman",
+            "Courier New",
+            "Georgia",
+            "Verdana",
+            "Trebuchet MS",
+            "Lucida Sans",
+            "Inter",
+          ]);
+          const googleFamilies = Array.from(familySet).filter(
+            (f) =>
+              (!systemFonts.has(f) && f.includes(" ")) || !systemFonts.has(f)
+          );
+
+          const importLines: string[] = [];
+          for (const family of googleFamilies) {
+            // Build Google Fonts import URL-safe family string
+            const encoded = encodeURIComponent(family.replace(/\s+/g, "+"));
+            const importLine = `@import url('https://fonts.googleapis.com/css2?family=${encoded}&display=swap');`;
+            // Avoid duplicating imports or conflicting @font-face; removed family check as it blocks when in font-family rule
+            if (
+              !finalCss.includes(importLine) &&
+              !finalCss.includes(`@font-face`)
+            ) {
+              importLines.push(importLine);
+            }
+          }
+
+          console.log("Generated import lines:", importLines);
+
+          if (importLines.length > 0) {
+            finalCss = importLines.join("\n") + "\n\n" + finalCss;
+            console.log(
+              "Added imports to final CSS (first 200 chars):",
+              finalCss.substring(0, 200)
+            );
+          } else {
+            console.log(
+              "No new imports added; checking if already present in final CSS"
+            );
+          }
+        } catch (impErr) {
+          console.warn("Failed to compute font imports", impErr);
+        }
 
         try {
           localStorage.setItem(`${RAW_PREFIX}${documentId}`, finalCss);
@@ -280,6 +368,37 @@ export default function StylingPopoverContent({
           options={tags}
           label="Element"
         />
+
+        <div className="mt-3">
+          <FontUtility
+            value={currentFontFamily}
+            onSelect={(family) => {
+              const newFamilyRule = `font-family: "${family}", sans-serif;`;
+              let newValue = value;
+              const fontMatch = newValue.match(/font-family:\s*([^;]+);/i);
+              if (fontMatch) {
+                // Replace existing
+                newValue = newValue.replace(
+                  /font-family:\s*[^;]+;/i,
+                  newFamilyRule
+                );
+              } else {
+                // Add after first { or at end
+                const braceIndex = newValue.indexOf("{");
+                if (braceIndex !== -1) {
+                  newValue =
+                    newValue.slice(0, braceIndex + 1) +
+                    `\n  ${newFamilyRule}\n` +
+                    newValue.slice(braceIndex + 1);
+                } else {
+                  newValue += `\n  ${newFamilyRule}`;
+                }
+              }
+              setValue(newValue);
+              setCurrentFontFamily(family);
+            }}
+          />
+        </div>
       </div>
 
       <div className="border rounded overflow-hidden bg-background">

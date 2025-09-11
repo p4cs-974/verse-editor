@@ -123,7 +123,7 @@ function Message({
     if (!view) return;
     const changes = { from: 0, to: view.state.doc.length, insert: displayText };
     view.dispatch(view.state.update({ changes }));
-  }, [displayText, editorRef.current]);
+  }, [displayText]);
 
   return (
     // <p>{displayText}</p>
