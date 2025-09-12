@@ -46,8 +46,6 @@ export default function FontUtility({
 }: FontUtilityProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showImport, setShowImport] = useState(false);
-  const [selectedFamily, setSelectedFamily] = useState(""); // For import prompt
 
   // Get user ID from Clerk if not provided
   // Get user ID from Clerk if not provided
@@ -60,6 +58,7 @@ export default function FontUtility({
       api.fonts.listUserFonts,
       currentUserId ? { userId: currentUserId } : "skip"
     ) ?? [];
+
   // Mutation to add a font for the user
   const addUserFont = useMutation(api.fonts.addUserFont);
 
@@ -108,12 +107,30 @@ export default function FontUtility({
   }, [value]);
 
   // All options: imported first, then search
+  // Deduplicate so imported fonts don't appear twice (imported + search results).
   const options: FontOption[] = useMemo(() => {
-    const imported = importedFonts.map((family) => ({
-      family,
-      isImported: true,
-    }));
-    const search = googleFonts.map((f) => ({ ...f, isGoogle: true }));
+    const seen = new Set<string>();
+    const imported: FontOption[] = [];
+
+    for (const fam of importedFonts) {
+      const norm = String(fam).trim();
+      const key = norm.toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        imported.push({ family: norm, isImported: true });
+      }
+    }
+
+    // Exclude search results that are already imported (case-insensitive)
+    const search: FontOption[] = googleFonts
+      .map((f) => ({ ...f, isGoogle: true }))
+      .filter((f) => {
+        const key = String(f.family ?? "")
+          .trim()
+          .toLowerCase();
+        return key && !seen.has(key);
+      });
+
     return [...imported, ...search];
   }, [importedFonts, googleFonts]);
 
@@ -130,19 +147,17 @@ export default function FontUtility({
     setSearchQuery("");
   };
 
-  const handleImport = async () => {
-    if (selectedFamily && currentUserId) {
-      try {
-        await addUserFont({
-          userId: currentUserId,
-          family: selectedFamily,
-        });
-        handleSelect(selectedFamily); // applies and closes
-        setShowImport(false);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("Error importing font:", err);
-      }
+  const handleDirectImport = async (family: string) => {
+    if (!currentUserId) return;
+    try {
+      const familyTrim = String(family).trim();
+      await addUserFont({
+        userId: currentUserId,
+        family: familyTrim,
+      });
+      handleSelect(familyTrim);
+    } catch (err) {
+      console.error("Error importing font:", err);
     }
   };
 
@@ -176,14 +191,9 @@ export default function FontUtility({
                   key={option.family}
                   value={option.family}
                   onSelect={() => {
-                    // If this is a Google font (not already imported), open the import UI
-                    // and DO NOT close the popover yet. Only close the popover/select
-                    // after a successful import in handleImport.
                     if (option.isGoogle && !option.isImported) {
-                      setSelectedFamily(option.family);
-                      setShowImport(true);
+                      handleDirectImport(option.family);
                     } else {
-                      // For imported/local fonts just select and close immediately
                       handleSelect(option.family);
                     }
                   }}
@@ -210,8 +220,7 @@ export default function FontUtility({
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedFamily(option.family);
-                        setShowImport(true);
+                        handleDirectImport(option.family);
                       }}
                     >
                       <Plus className="h-3 w-3" />
@@ -222,25 +231,6 @@ export default function FontUtility({
             </CommandGroup>
           </CommandList>
         </Command>
-        {showImport && (
-          <div className="p-2 border-t">
-            <p className="text-sm text-muted-foreground mb-2">
-              Import "{selectedFamily}" to your fonts?
-            </p>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleImport}>
-                Import
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowImport(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   );

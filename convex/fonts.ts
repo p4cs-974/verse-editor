@@ -14,6 +14,7 @@ export const listUserFonts = query({
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .order("desc")
       .collect();
+
     return fonts.map((font) => font.family);
   },
 });
@@ -39,11 +40,13 @@ export const addUserFont = mutation({
       return existing._id;
     }
 
-    return await ctx.db.insert("userFonts", {
+    const newId = await ctx.db.insert("userFonts", {
       userId: args.userId,
       family: args.family,
       importedAt: Date.now(),
     });
+
+    return newId;
   },
 });
 

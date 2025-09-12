@@ -18,7 +18,6 @@ const RAW_PREFIX = "md-editor:css-raw:";
 type CssMap = Record<string, string>;
 
 const DEFAULT_TAGS: TagOption[] = [
-  { value: "body", label: "Document body" },
   { value: "p", label: "Text (paragraph)" },
   { value: "h1", label: "Heading 1 (#)" },
   { value: "h2", label: "Heading 2 (##)" },
@@ -32,6 +31,7 @@ const DEFAULT_TAGS: TagOption[] = [
   { value: "th", label: "Table header" },
   { value: "td", label: "Table data" },
   { value: "blockquote", label: "Blockquote" },
+  { value: "body", label: "Document body" },
 ];
 
 function escapeForRegex(sel: string) {
@@ -78,7 +78,12 @@ function scopeCssBlock(block: string): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) =>
-      s.startsWith(".verse-preview-content") ? s : `.verse-preview-content ${s}`
+      s.startsWith(".verse-preview-content")
+        ? `.verse-preview-content.prose ${s.replace(
+            /^\.verse-preview-content\s+/,
+            ""
+          )}`
+        : `.verse-preview-content.prose ${s}`
     )
     .join(", ");
   return `${scoped} ${body}`;
@@ -94,7 +99,9 @@ function unscopeCssBlock(block: string): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) =>
-      s.startsWith(".verse-preview-content ")
+      s.startsWith(".verse-preview-content.prose ")
+        ? s.replace(/^\.verse-preview-content\.prose\s+/, "")
+        : s.startsWith(".verse-preview-content ")
         ? s.replace(/^\.verse-preview-content\s+/, "")
         : s
     )
@@ -251,7 +258,6 @@ export default function StylingPopoverContent({
 
         // Detect font-family declarations in the managed blocks and ensure Google Fonts @import lines
         try {
-          console.log("Computing font imports for CSS update");
           const familySet = new Set<string>();
           for (const block of Object.values(next)) {
             if (!block) continue;
@@ -278,8 +284,6 @@ export default function StylingPopoverContent({
             }
           }
 
-          console.log("Detected font families:", Array.from(familySet));
-
           // Filter out obvious system fonts that don't need import
           const systemFonts = new Set([
             "Arial",
@@ -299,40 +303,50 @@ export default function StylingPopoverContent({
             (f) => !systemFonts.has(f)
           );
 
+          // Remove any existing Google Fonts @import lines first so we always inject
+          // a canonical, correctly-encoded set of imports. This avoids keeping
+          // malformed or duplicated imports that may prevent font loading.
+          try {
+            finalCss = finalCss.replace(
+              /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/css2\?family=[^'"]+['"]\);\s*/gi,
+              ""
+            );
+            // Also remove any legacy @import lines that use fonts.googleapis.com without css2 token
+            finalCss = finalCss.replace(
+              /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/[^'"]+['"]\);\s*/gi,
+              ""
+            );
+          } catch {
+            // ignore replace errors
+          }
+
           const importLines: string[] = [];
           for (const family of googleFamilies) {
-            // Build a Google Fonts family token without double-encoding:
-            // encodeURIComponent the raw family name, then convert encoded spaces to '+'
-            // which is the expected separator in Google Fonts family tokens.
-            const token = encodeURIComponent(family).replace(/%20/g, "+");
+            // Normalize family name and build a Google Fonts family token:
+            // - Trim whitespace
+            // - Replace multiple internal spaces with single spaces
+            // - encodeURIComponent then convert %20 to '+'
+            const familyNorm = String(family).trim().replace(/\s+/g, " ");
+            const token = encodeURIComponent(familyNorm).replace(/%20/g, "+");
             const importLine = `@import url('https://fonts.googleapis.com/css2?family=${token}&display=swap');`;
 
-            // Avoid adding the import if that exact import line already exists
-            // or if there's an @font-face rule specifically for this family.
+            // If there's an explicit @font-face rule for this family we won't add an import,
+            // but we've already removed existing @import lines above so this check is mostly
+            // defensive against custom @font-face declarations in the document CSS.
             const fontFaceRe = new RegExp(
               `@font-face[\\s\\S]*?font-family\\s*:\\s*['"]?${escapeForRegex(
-                family
+                familyNorm
               )}['"]?`,
               "i"
             );
 
-            if (!finalCss.includes(importLine) && !fontFaceRe.test(finalCss)) {
+            if (!fontFaceRe.test(finalCss)) {
               importLines.push(importLine);
             }
           }
 
-          console.log("Generated import lines:", importLines);
-
           if (importLines.length > 0) {
             finalCss = importLines.join("\n") + "\n\n" + finalCss;
-            console.log(
-              "Added imports to final CSS (first 200 chars):",
-              finalCss.substring(0, 200)
-            );
-          } else {
-            console.log(
-              "No new imports added; checking if already present in final CSS"
-            );
           }
         } catch (impErr) {
           console.warn("Failed to compute font imports", impErr);
@@ -379,13 +393,13 @@ export default function StylingPopoverContent({
           <FontUtility
             value={currentFontFamily}
             onSelect={(family) => {
-              const newFamilyRule = `font-family: "${family}", sans-serif;`;
+              const newFamilyRule = `font-family: "${family}", sans-serif !important;`;
               let newValue = value;
               const fontMatch = newValue.match(/font-family:\s*([^;]+);/i);
               if (fontMatch) {
                 // Replace existing
                 newValue = newValue.replace(
-                  /font-family:\s*[^;]+;/i,
+                  /font-family:\s*[^;]+;?/i,
                   newFamilyRule
                 );
               } else {
