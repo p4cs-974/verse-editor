@@ -46,7 +46,7 @@
   { "family": "EB Garamond", "category": "serif" },
   { "family": "Georgia", "category": "serif" },
   { "family": "Hoefler Text", "category": "serif" },
-  { "family": "Iosevka", "category": "serif" },
+  { "family": "Iosevka", "category": "monospace" },
   { "family": "Instrument Serif", "category": "serif" },
   { "family": "Junicode", "category": "serif" },
   { "family": "Libre Franklin", "category": "serif" },
