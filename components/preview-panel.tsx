@@ -75,6 +75,19 @@ if (process.env.NODE_ENV === "development") {
   console.debug("[preview-panel] marked-katex-extension registered");
 }
 
+/**
+ * Renders a sanitized Markdown preview with client-side Mermaid and KaTeX rendering while preserving existing <img> elements to avoid unnecessary reloads.
+ *
+ * The component:
+ * - Parses Markdown (marked) and sanitizes the resulting HTML (DOMPurify) with hooks that harden link/image attributes and block unsafe URL protocols.
+ * - Injects sanitized HTML into a managed container and, when possible, reuses previously existing <img> elements that have the same `src` to prevent re-downloading images.
+ * - Finds and renders `.mermaid` code blocks by dynamically importing Mermaid and replacing the blocks with generated SVGs.
+ * - Invokes KaTeX auto-render (dynamically imported) after HTML insertion to render math delimiters, ignoring protected tags/classes and continuing silently on errors.
+ *
+ * @param props.doc - Optional document metadata; `cssContent` (if present) is injected as an inline <style> into the preview.
+ * @param props.content - Markdown source to render; when empty, a "No document selected." message is shown.
+ * @returns A React element containing the preview surface.
+ */
 function PreviewPanel({ doc, content }: PreviewPanelProps) {
   const purifier = useMemo<DOMPurify>(() => {
     const p = createDOMPurify(window);

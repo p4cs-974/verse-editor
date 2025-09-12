@@ -91,6 +91,19 @@ interface PopoverContentProps {
   threadId: string;
 }
 
+/**
+ * Renders a single assistant message inside a read-only CodeMirror editor, optionally with smooth streaming.
+ *
+ * If the provided message is not from the assistant, this component returns null. By default streaming is enabled
+ * when message.status === "streaming"; pass `startStreaming` to explicitly enable or disable the smooth streaming
+ * behavior for this message. When streaming isn't producing visible intermediate text, the final message text is
+ * shown immediately.
+ *
+ * @param startStreaming - Optional override to force streaming on (true) or off (false). If omitted, streaming is
+ *                         enabled when `message.status === "streaming"`.
+ * @returns A JSX element containing a read-only CodeMirror rendering of the assistant message, or `null` for
+ *          non-assistant messages.
+ */
 function Message({
   message,
   startStreaming,
@@ -162,7 +175,17 @@ function Message({
 //       </div>
 //     </div>
 //   );
-// }
+/**
+ * Render and manage a paginated, stream-aware UI for assistant messages in a thread.
+ *
+ * Displays assistant messages for the given threadId, merging paginated snapshots with live stream deltas so streaming responses appear incrementally.
+ * While a response is streaming the component prefers live data; once streaming completes a non-empty snapshot is persisted to the module cache for faster subsequent loads.
+ * Provides a prompt input with optimistic send, copy-to-clipboard for the currently selected assistant message, and pagination controls (previous/next and page links).
+ *
+ * The component keeps all message entries mounted so ongoing streams continue updating, but only the active message is shown visually. It auto-advances to new assistant messages and clamps the current index when messages are removed.
+ *
+ * @param threadId - The identifier of the thread whose assistant messages should be displayed.
+ */
 
 function Story({ threadId }: { threadId: string }) {
   const messages = useThreadMessages(
