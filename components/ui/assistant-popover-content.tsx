@@ -91,10 +91,32 @@ interface PopoverContentProps {
   threadId: string;
 }
 
-function Message({ message }: { message: UIMessage }) {
-  // visibleText animates incoming text; default to the final text when not streaming.
+/**
+ * Renders a single assistant message inside a read-only CodeMirror editor, optionally with smooth streaming.
+ *
+ * If the provided message is not from the assistant, this component returns null. By default streaming is enabled
+ * when message.status === "streaming"; pass `startStreaming` to explicitly enable or disable the smooth streaming
+ * behavior for this message. When streaming isn't producing visible intermediate text, the final message text is
+ * shown immediately.
+ *
+ * @param startStreaming - Optional override to force streaming on (true) or off (false). If omitted, streaming is
+ *                         enabled when `message.status === "streaming"`.
+ * @returns A JSX element containing a read-only CodeMirror rendering of the assistant message, or `null` for
+ *          non-assistant messages.
+ */
+function Message({
+  message,
+  startStreaming,
+}: {
+  message: UIMessage;
+  startStreaming?: boolean;
+}) {
+  // Determine whether we should kick off smooth streaming for this message.
+  const effectiveStartStreaming =
+    startStreaming ?? message.status === "streaming";
+
   const [visibleText] = useSmoothText(message.text, {
-    startStreaming: message.status === "streaming",
+    startStreaming: effectiveStartStreaming,
   });
 
   const isAssistantMsg = message.role === "assistant";
@@ -103,20 +125,26 @@ function Message({ message }: { message: UIMessage }) {
 
   if (!isAssistantMsg) return null;
 
+  // Fallback: if useSmoothText has not produced any visibleText yet (e.g. single-chunk
+  // "success" responses that don't emit deltas), render the final message.text so the
+  // user can see short responses immediately. For streaming cases, visibleText will
+  // populate and be preferred.
+  const displayText = visibleText || message.text;
+
   React.useEffect(() => {
     const view = editorRef.current;
     if (!view) return;
-    const changes = { from: 0, to: view.state.doc.length, insert: visibleText };
+    const changes = { from: 0, to: view.state.doc.length, insert: displayText };
     view.dispatch(view.state.update({ changes }));
-  }, [visibleText]);
+  }, [displayText]);
 
   return (
-    // <p>{visibleText}</p>
+    // <p>{displayText}</p>
     <CodeMirror
       onCreateEditor={(view) => {
         editorRef.current = view;
       }}
-      value={visibleText}
+      value={displayText}
       height="372px"
       extensions={[markdown(), EditorView.lineWrapping]}
       editable={false}
@@ -147,7 +175,17 @@ function Message({ message }: { message: UIMessage }) {
 //       </div>
 //     </div>
 //   );
-// }
+/**
+ * Render and manage a paginated, stream-aware UI for assistant messages in a thread.
+ *
+ * Displays assistant messages for the given threadId, merging paginated snapshots with live stream deltas so streaming responses appear incrementally.
+ * While a response is streaming the component prefers live data; once streaming completes a non-empty snapshot is persisted to the module cache for faster subsequent loads.
+ * Provides a prompt input with optimistic send, copy-to-clipboard for the currently selected assistant message, and pagination controls (previous/next and page links).
+ *
+ * The component keeps all message entries mounted so ongoing streams continue updating, but only the active message is shown visually. It auto-advances to new assistant messages and clamps the current index when messages are removed.
+ *
+ * @param threadId - The identifier of the thread whose assistant messages should be displayed.
+ */
 
 function Story({ threadId }: { threadId: string }) {
   const messages = useThreadMessages(
@@ -203,6 +241,9 @@ function Story({ threadId }: { threadId: string }) {
       s.streamId ??
       `${s.threadId}-stream-${s.streamId ?? Math.random()}`;
     const existing = mergedById[id] ?? {};
+    const computedStatus = s.streaming
+      ? "streaming"
+      : existing.status ?? s.status;
     mergedById[id] = {
       ...existing,
       ...s,
@@ -214,7 +255,7 @@ function Story({ threadId }: { threadId: string }) {
       message: existing.message ?? s.message,
       text: (existing.text ?? "") + (s.text ?? ""),
       streaming: s.streaming ?? existing.streaming ?? true,
-      status: s.streaming ? "streaming" : existing.status ?? s.status,
+      status: computedStatus,
     };
   }
   const rawResults = Object.values(mergedById).sort((a: any, b: any) => {
@@ -383,16 +424,24 @@ function Story({ threadId }: { threadId: string }) {
       {assistantMessages.length > 0 ? (
         <div className="flex flex-col gap-3">
           <div className="border rounded-md overflow-hidden bg-neutral-950">
-            {assistantMessages.map((msg, idx) => (
-              <div
-                key={msg.key}
-                // keep all Message components mounted so streaming continues,
-                // but only show the active one visually.
-                className={idx === currentIndex ? "" : "hidden"}
-              >
-                <Message message={msg} />
-              </div>
-            ))}
+            {assistantMessages.map((msg, idx) => {
+              const startStreamingForThis =
+                idx === currentIndex &&
+                (msg.status === "streaming" || msg.status === "success");
+              return (
+                <div
+                  key={msg.key}
+                  // keep all Message components mounted so streaming continues,
+                  // but only show the active one visually.
+                  className={idx === currentIndex ? "" : "hidden"}
+                >
+                  <Message
+                    message={msg}
+                    startStreaming={startStreamingForThis}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <Pagination className="mt-2">

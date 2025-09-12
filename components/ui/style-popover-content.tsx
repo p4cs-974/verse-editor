@@ -5,6 +5,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { css } from "@codemirror/lang-css";
 import { Button } from "@/components/ui/button";
 import { TagCombobox, type TagOption } from "@/components/ui/combobox";
+import FontUtility from "./font-utility";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -27,9 +28,18 @@ const DEFAULT_TAGS: TagOption[] = [
   { value: "ul, ol", label: "Lists (ul, ol)" },
   { value: "li", label: "List item (li)" },
   { value: "table", label: "Table" },
+  { value: "th", label: "Table header" },
+  { value: "td", label: "Table data" },
   { value: "blockquote", label: "Blockquote" },
+  { value: "body", label: "Document body" },
 ];
 
+/**
+ * Escapes RegExp metacharacters in a string so it can be safely used inside a regular expression.
+ *
+ * @param sel - The input selector or text to escape.
+ * @returns The input with all RegExp-special characters escaped (suitable for use in a RegExp pattern).
+ */
 function escapeForRegex(sel: string) {
   return sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -64,6 +74,21 @@ function extractBlockFromCss(selector: string, cssText: string): string | null {
   }
 }
 
+/**
+ * Scopes a CSS rule block so its selectors are nested under `.verse-preview-content.prose`.
+ *
+ * Given a CSS block string like `selector1, selector2 { ... }`, this returns a block
+ * where each selector is prefixed with `.verse-preview-content.prose `.
+ * Selectors that already start with `.verse-preview-content` are rewritten to use
+ * `.verse-preview-content.prose` while preserving the remainder of the selector.
+ *
+ * If the input does not contain a `{` (i.e., not a CSS rule block), the original
+ * string is returned unchanged.
+ *
+ * @param block - A CSS rule block (selector list followed by a `{ ... }` body).
+ * @returns The transformed CSS block with all selectors scoped under
+ * `.verse-preview-content.prose`.
+ */
 function scopeCssBlock(block: string): string {
   const i = block.indexOf("{");
   if (i === -1) return block;
@@ -74,12 +99,27 @@ function scopeCssBlock(block: string): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) =>
-      s.startsWith(".verse-preview-content") ? s : `.verse-preview-content ${s}`
+      s.startsWith(".verse-preview-content")
+        ? `.verse-preview-content.prose ${s.replace(
+            /^\.verse-preview-content\s+/,
+            ""
+          )}`
+        : `.verse-preview-content.prose ${s}`
     )
     .join(", ");
   return `${scoped} ${body}`;
 }
 
+/**
+ * Removes preview scoping prefixes from the selector list of a CSS block.
+ *
+ * This takes a CSS block string (selector(s) followed by `{ ... }`) and strips a leading
+ * ".verse-preview-content.prose " or ".verse-preview-content " prefix from each selector while
+ * preserving the block body. If the input has no `{` it is returned unchanged.
+ *
+ * @param block - A CSS rule block (selectors followed by a `{ ... }` body).
+ * @returns The CSS block with preview scoping prefixes removed from its selectors.
+ */
 function unscopeCssBlock(block: string): string {
   const i = block.indexOf("{");
   if (i === -1) return block;
@@ -90,7 +130,9 @@ function unscopeCssBlock(block: string): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) =>
-      s.startsWith(".verse-preview-content ")
+      s.startsWith(".verse-preview-content.prose ")
+        ? s.replace(/^\.verse-preview-content\.prose\s+/, "")
+        : s.startsWith(".verse-preview-content ")
         ? s.replace(/^\.verse-preview-content\s+/, "")
         : s
     )
@@ -143,6 +185,28 @@ function removeBasePreviewBlock(cssText: string): string {
   }
 }
 
+/**
+ * UI component that provides a per-element CSS editor and persists scoped styles.
+ *
+ * Renders a small popover allowing selection of an element (e.g., paragraph, headings, table cells),
+ * editing a CSS block for that element, picking a font via FontUtility, and applying changes.
+ * Edited blocks are stored in localStorage under a document-scoped key; when a `documentId` is provided
+ * the component also composes a final, scoped CSS payload (including automatic Google Fonts @import
+ * generation for non-system families) and updates the document via a mutation.
+ *
+ * Props:
+ * @param documentId - Optional document identifier; when provided the component will persist the composed CSS to that document.
+ * @param cssContent - Optional initial/raw CSS for the document used to hydrate per-element blocks when no per-document map exists.
+ * @param onClose - Optional callback invoked when the popover's Close button is pressed.
+ *
+ * Side effects:
+ * - Saves per-element CSS map to localStorage.
+ * - If `documentId` is set, composes and persists the final CSS to the document via an update mutation.
+ * - Listens for storage events to keep in-sync with other windows.
+ *
+ * Returns:
+ * A React element for the styling popover.
+ */
 export default function StylingPopoverContent({
   documentId,
   cssContent,
@@ -154,6 +218,7 @@ export default function StylingPopoverContent({
 }) {
   const [tags] = useState<TagOption[]>(DEFAULT_TAGS);
   const [selected, setSelected] = useState<string>(tags[0]?.value || "p");
+  const [currentFontFamily, setCurrentFontFamily] = useState<string>("");
   const [cssMap, setCssMap] = useState<CssMap>({});
   const [value, setValue] = useState<string>("");
 
@@ -194,6 +259,10 @@ export default function StylingPopoverContent({
   useEffect(() => {
     const current = cssMap[selected] ?? defaultTemplateFor(selected);
     setValue(current);
+
+    // Parse current font-family from value
+    const fontMatch = current.match(/font-family:\s*([^;]+);/i);
+    setCurrentFontFamily(fontMatch ? fontMatch[1].trim() : "");
   }, [selected, cssMap]);
 
   useEffect(() => {
@@ -238,11 +307,103 @@ export default function StylingPopoverContent({
           baseStripped.trim(),
           aggregated.trim(),
         ].filter(Boolean);
-        const finalCss = parts.join("\n\n");
+        let finalCss = parts.join("\n\n");
 
+        // Detect font-family declarations in the managed blocks and ensure Google Fonts @import lines
         try {
-          localStorage.setItem(`${RAW_PREFIX}${documentId}`, finalCss);
-        } catch {}
+          const familySet = new Set<string>();
+          for (const block of Object.values(next)) {
+            if (!block) continue;
+            const matches = block.match(/font-family:\s*([^;]+);/gi);
+            if (!matches) continue;
+            for (const m of matches) {
+              const valMatch = /font-family:\s*([^;]+);/i.exec(m);
+              if (!valMatch) continue;
+              const rawVal = valMatch[1].trim();
+              const primary = rawVal.split(",")[0].trim().replace(/['"]/g, "");
+              if (primary) familySet.add(primary);
+            }
+          }
+
+          // Also check any remaining font-family declarations already in baseStripped
+          const extraMatches = baseStripped.match(/font-family:\s*([^;]+);/gi);
+          if (extraMatches) {
+            for (const m of extraMatches) {
+              const valMatch = /font-family:\s*([^;]+);/i.exec(m);
+              if (!valMatch) continue;
+              const rawVal = valMatch[1].trim();
+              const primary = rawVal.split(",")[0].trim().replace(/['"]/g, "");
+              if (primary) familySet.add(primary);
+            }
+          }
+
+          // Filter out obvious system fonts that don't need import
+          const systemFonts = new Set([
+            "Arial",
+            "Helvetica",
+            "Times New Roman",
+            "Courier New",
+            // Allow "Inter" to be imported from Google Fonts, so do not include it here
+            // "Inter",
+            "Georgia",
+            "Verdana",
+            "Trebuchet MS",
+            "Lucida Sans",
+          ]);
+
+          // Only consider families that are not obvious system fonts
+          const googleFamilies = Array.from(familySet).filter(
+            (f) => !systemFonts.has(f)
+          );
+
+          // Remove any existing Google Fonts @import lines first so we always inject
+          // a canonical, correctly-encoded set of imports. This avoids keeping
+          // malformed or duplicated imports that may prevent font loading.
+          try {
+            finalCss = finalCss.replace(
+              /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/css2\?family=[^'"]+['"]\);\s*/gi,
+              ""
+            );
+            // Also remove any legacy @import lines that use fonts.googleapis.com without css2 token
+            finalCss = finalCss.replace(
+              /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/[^'"]+['"]\);\s*/gi,
+              ""
+            );
+          } catch {
+            // ignore replace errors
+          }
+
+          const importLines: string[] = [];
+          for (const family of googleFamilies) {
+            // Normalize family name and build a Google Fonts family token:
+            // - Trim whitespace
+            // - Replace multiple internal spaces with single spaces
+            // - encodeURIComponent then convert %20 to '+'
+            const familyNorm = String(family).trim().replace(/\s+/g, " ");
+            const token = encodeURIComponent(familyNorm).replace(/%20/g, "+");
+            const importLine = `@import url('https://fonts.googleapis.com/css2?family=${token}&display=swap');`;
+
+            // If there's an explicit @font-face rule for this family we won't add an import,
+            // but we've already removed existing @import lines above so this check is mostly
+            // defensive against custom @font-face declarations in the document CSS.
+            const fontFaceRe = new RegExp(
+              `@font-face[\\s\\S]*?font-family\\s*:\\s*['"]?${escapeForRegex(
+                familyNorm
+              )}['"]?`,
+              "i"
+            );
+
+            if (!fontFaceRe.test(finalCss)) {
+              importLines.push(importLine);
+            }
+          }
+
+          if (importLines.length > 0) {
+            finalCss = importLines.join("\n") + "\n\n" + finalCss;
+          }
+        } catch (impErr) {
+          console.warn("Failed to compute font imports", impErr);
+        }
         await updateDocument({ documentId, cssContent: finalCss });
       } catch (e) {
         console.warn("Failed to update document CSS", e);
@@ -280,6 +441,37 @@ export default function StylingPopoverContent({
           options={tags}
           label="Element"
         />
+
+        <div className="mt-3">
+          <FontUtility
+            value={currentFontFamily}
+            onSelect={(family) => {
+              const newFamilyRule = `font-family: "${family}", sans-serif !important;`;
+              let newValue = value;
+              const fontMatch = newValue.match(/font-family:\s*([^;]+);/i);
+              if (fontMatch) {
+                // Replace existing
+                newValue = newValue.replace(
+                  /font-family:\s*[^;]+;?/i,
+                  newFamilyRule
+                );
+              } else {
+                // Add after first { or at end
+                const braceIndex = newValue.indexOf("{");
+                if (braceIndex !== -1) {
+                  newValue =
+                    newValue.slice(0, braceIndex + 1) +
+                    `\n  ${newFamilyRule}\n` +
+                    newValue.slice(braceIndex + 1);
+                } else {
+                  newValue += `\n  ${newFamilyRule}`;
+                }
+              }
+              setValue(newValue);
+              setCurrentFontFamily(family);
+            }}
+          />
+        </div>
       </div>
 
       <div className="border rounded overflow-hidden bg-background">

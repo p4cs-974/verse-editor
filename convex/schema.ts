@@ -218,4 +218,13 @@ export default defineSchema({
     value: v.string(),
     createdAt: v.number(),
   }).index("by_key", ["key"]),
+
+  // User-imported fonts (global per user)
+  userFonts: defineTable({
+    userId: v.string(), // Clerk subject ID
+    family: v.string(), // e.g., "Inter", "Roboto"
+    importedAt: v.number(), // timestamp
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_family", ["userId", "family"]),
 });
