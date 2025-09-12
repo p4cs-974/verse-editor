@@ -34,6 +34,12 @@ const DEFAULT_TAGS: TagOption[] = [
   { value: "body", label: "Document body" },
 ];
 
+/**
+ * Escapes RegExp metacharacters in a string so it can be safely used inside a regular expression.
+ *
+ * @param sel - The input selector or text to escape.
+ * @returns The input with all RegExp-special characters escaped (suitable for use in a RegExp pattern).
+ */
 function escapeForRegex(sel: string) {
   return sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -68,6 +74,21 @@ function extractBlockFromCss(selector: string, cssText: string): string | null {
   }
 }
 
+/**
+ * Scopes a CSS rule block so its selectors are nested under `.verse-preview-content.prose`.
+ *
+ * Given a CSS block string like `selector1, selector2 { ... }`, this returns a block
+ * where each selector is prefixed with `.verse-preview-content.prose `.
+ * Selectors that already start with `.verse-preview-content` are rewritten to use
+ * `.verse-preview-content.prose` while preserving the remainder of the selector.
+ *
+ * If the input does not contain a `{` (i.e., not a CSS rule block), the original
+ * string is returned unchanged.
+ *
+ * @param block - A CSS rule block (selector list followed by a `{ ... }` body).
+ * @returns The transformed CSS block with all selectors scoped under
+ * `.verse-preview-content.prose`.
+ */
 function scopeCssBlock(block: string): string {
   const i = block.indexOf("{");
   if (i === -1) return block;
@@ -89,6 +110,16 @@ function scopeCssBlock(block: string): string {
   return `${scoped} ${body}`;
 }
 
+/**
+ * Removes preview scoping prefixes from the selector list of a CSS block.
+ *
+ * This takes a CSS block string (selector(s) followed by `{ ... }`) and strips a leading
+ * ".verse-preview-content.prose " or ".verse-preview-content " prefix from each selector while
+ * preserving the block body. If the input has no `{` it is returned unchanged.
+ *
+ * @param block - A CSS rule block (selectors followed by a `{ ... }` body).
+ * @returns The CSS block with preview scoping prefixes removed from its selectors.
+ */
 function unscopeCssBlock(block: string): string {
   const i = block.indexOf("{");
   if (i === -1) return block;
@@ -154,6 +185,28 @@ function removeBasePreviewBlock(cssText: string): string {
   }
 }
 
+/**
+ * UI component that provides a per-element CSS editor and persists scoped styles.
+ *
+ * Renders a small popover allowing selection of an element (e.g., paragraph, headings, table cells),
+ * editing a CSS block for that element, picking a font via FontUtility, and applying changes.
+ * Edited blocks are stored in localStorage under a document-scoped key; when a `documentId` is provided
+ * the component also composes a final, scoped CSS payload (including automatic Google Fonts @import
+ * generation for non-system families) and updates the document via a mutation.
+ *
+ * Props:
+ * @param documentId - Optional document identifier; when provided the component will persist the composed CSS to that document.
+ * @param cssContent - Optional initial/raw CSS for the document used to hydrate per-element blocks when no per-document map exists.
+ * @param onClose - Optional callback invoked when the popover's Close button is pressed.
+ *
+ * Side effects:
+ * - Saves per-element CSS map to localStorage.
+ * - If `documentId` is set, composes and persists the final CSS to the document via an update mutation.
+ * - Listens for storage events to keep in-sync with other windows.
+ *
+ * Returns:
+ * A React element for the styling popover.
+ */
 export default function StylingPopoverContent({
   documentId,
   cssContent,

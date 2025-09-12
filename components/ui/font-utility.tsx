@@ -37,6 +37,29 @@ interface FontUtilityProps {
   buttonClassName?: string;
 }
 
+/**
+ * A font picker popover that combines the user's imported fonts with Google Fonts search results.
+ *
+ * Renders a trigger button showing the currently selected font and a searchable dropdown of font
+ * options. Imported fonts are listed first and Google search results are shown below; search results
+ * that are already imported are deduplicated. Google fonts can be imported directly into the
+ * user's library (if a user ID is available) and are selected immediately after import.
+ *
+ * The component:
+ * - Shows a live preview of each option using inline `font-family` styling.
+ * - Filters options by the search query.
+ * - Performs a limited Google Fonts search when the query is non-empty and updates results.
+ *
+ * @param value - Current CSS `font-family` string (e.g., `"Inter, sans-serif"`). The primary family
+ *   (before the first comma, with quotes removed) is used for display and preview.
+ * @param onSelect - Callback invoked with the selected family string when the user selects or
+ *   imports a font.
+ * @param userId - Optional Clerk user ID. When provided (or available via auth), enables importing
+ *   Google fonts into the user's imported-fonts list.
+ * @param placeholder - Placeholder text for the search input.
+ * @param buttonClassName - Additional CSS class names applied to the trigger button.
+ * @returns A React element rendering the font picker UI.
+ */
 export default function FontUtility({
   value = "",
   onSelect,
