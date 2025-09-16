@@ -1,6 +1,7 @@
 import { components, internal, api } from "./_generated/api";
 import {
   Agent,
+  createTool,
   UsageHandler,
   vProviderMetadata,
   vStreamArgs,
@@ -19,6 +20,8 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
+import { z } from "zod";
+import { Id } from "./_generated/dataModel";
 
 const DEFAULT_MARKDOWN_INSTRUCTIONS = `You are a Markdown and HTML expert assistant for a markdown editor.
 Output only the final content with no explanations.
@@ -139,6 +142,316 @@ const markdownAgent = new Agent(components.agent, {
     }
   },
   instructions: DEFAULT_MARKDOWN_INSTRUCTIONS,
+});
+
+export const read_document_markdown_content = createTool<
+  { documentId: string },
+  string
+>({
+  description: "Search for the current selected document's markdown content.",
+  args: z.object({
+    documentId: z
+      .string()
+      .describe("The id of the document to get the markdown content of."),
+  }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string }
+  ): Promise<string> => {
+    const document = await ctx.runQuery(api.documents.getDocument, {
+      documentId: args.documentId as Id<"documents">,
+    });
+    if (!document) throw new Error("Document not found");
+    return document.markdownContent;
+  },
+});
+
+export const edit_document_markdown_content = createTool<
+  {
+    documentId: string;
+    markdownContent: string;
+  },
+  void
+>({
+  description: "Edit the markdown content of a document.",
+  args: z.object({
+    documentId: z.string().describe("The id of the document to edit."),
+    markdownContent: z
+      .string()
+      .describe("New markdown content for the document."),
+  }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string; markdownContent: string }
+  ): Promise<void> => {
+    await ctx.runMutation(api.documents.updateDocument, {
+      documentId: args.documentId as Id<"documents">,
+      markdownContent: args.markdownContent,
+    });
+  },
+});
+
+export const read_document_style = createTool<
+  { documentId: string },
+  string | undefined
+>({
+  description: "Read a document's CSS/style content.",
+  args: z.object({ documentId: z.string() }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string }
+  ): Promise<string | undefined> => {
+    const document = await ctx.runQuery(api.documents.getDocument, {
+      documentId: args.documentId as Id<"documents">,
+    });
+    if (!document) throw new Error("Document not found");
+    return document.cssContent;
+  },
+});
+
+export const edit_document_style = createTool<
+  {
+    documentId: string;
+    cssContent: string | null;
+  },
+  void
+>({
+  description: "Edit a document's CSS/style content.",
+  args: z.object({
+    documentId: z.string(),
+    cssContent: z.union([z.string(), z.null()]),
+  }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string; cssContent: string | null }
+  ): Promise<void> => {
+    await ctx.runMutation(api.documents.updateDocument, {
+      documentId: args.documentId as Id<"documents">,
+      cssContent: args.cssContent,
+    });
+  },
+});
+
+export const read_document_fonts = createTool<
+  { documentId: string },
+  string[] | undefined
+>({
+  description: "Read fonts used by a document.",
+  args: z.object({ documentId: z.string() }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string }
+  ): Promise<string[] | undefined> => {
+    const document = await ctx.runQuery(api.documents.getDocument, {
+      documentId: args.documentId as Id<"documents">,
+    });
+    if (!document) throw new Error("Document not found");
+    const css = document.cssContent ?? "";
+    // Extract Google Fonts families from @import lines
+    const importRegex =
+      /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/css2\?([^'"\)]+)['"]\);/gi;
+    const families: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = importRegex.exec(css)) !== null) {
+      const query = match[1];
+      const params = new URLSearchParams(query);
+      for (const [key, value] of params.entries()) {
+        if (key === "family") {
+          // value like "Inter:wght@400;700" → take family name before colon
+          const family = value.split(":")[0];
+          if (family && !families.includes(family)) families.push(family);
+        }
+      }
+    }
+    return families.length ? families : undefined;
+  },
+});
+
+export const edit_document_fonts = createTool<
+  {
+    documentId: string;
+    fonts: string[];
+  },
+  void
+>({
+  description: "Edit fonts metadata for a document.",
+  args: z.object({ documentId: z.string(), fonts: z.array(z.string()) }),
+  handler: async (
+    ctx: ActionCtx,
+    args: { documentId: string; fonts: string[] }
+  ): Promise<void> => {
+    const document = await ctx.runQuery(api.documents.getDocument, {
+      documentId: args.documentId as Id<"documents">,
+    });
+    if (!document) throw new Error("Document not found");
+
+    const existingCss = document.cssContent ?? "";
+    // Remove existing Google Fonts @import lines (css2 and legacy)
+    const cleanedCss = existingCss
+      .replace(
+        /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/css2\?family=[^'"\)]+['"]\);\s*/gi,
+        ""
+      )
+      .replace(
+        /@import\s+url\(['"]https:\/\/fonts\.googleapis\.com\/[^'"\)]+['"]\);\s*/gi,
+        ""
+      );
+
+    const imports = (args.fonts || [])
+      .filter((f) => f && f.trim().length > 0)
+      .map(
+        (f) =>
+          `@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(
+            f.trim()
+          )}&display=swap');`
+      )
+      .join("\n");
+
+    const nextCss = imports.length ? `${imports}\n${cleanedCss}` : cleanedCss;
+
+    await ctx.runMutation(api.documents.updateDocument, {
+      documentId: args.documentId as Id<"documents">,
+      cssContent: nextCss,
+    });
+  },
+});
+
+const DEFAULT_FULL_AGENT_INSTRUCTIONS = `You are the Full Editor Agent for a markdown-based document editor.
+Your job is to write and revise the current document's content and styling via the provided tools.
+
+Core rules
+- Prefer pure Markdown for content. Use minimal HTML only if Markdown cannot express the layout.
+- When you need to update the document or its styles, always use the tools instead of replying with instructions.
+- If the user asks for up-to-date facts or references, use the browser_search tool first, then cite sources as Markdown links.
+
+Capabilities
+- Read markdown: use read_document_markdown_content with the provided documentId.
+- Edit markdown: use edit_document_markdown_content to overwrite the document's markdownContent with the exact new content you compose.
+- Read styles: use read_document_style to see current CSS (may be empty).
+- Edit styles: use edit_document_style to replace or augment CSS. Keep CSS minimal and scoped to content semantics.
+- Manage fonts: use read_document_fonts to detect imported Google Fonts from CSS; use edit_document_fonts to add/remove imports.
+
+Workflow
+1) Clarify the user intent in your own mind (do not ask unless ambiguous). Identify if this is a content change, a style change, or both.
+2) For content changes:
+   - Read the current markdown.
+   - Draft the full new markdown; keep prior content only if requested.
+   - Write the complete updated markdown via edit_document_markdown_content.
+3) For style changes:
+   - Read current CSS.
+   - Compute the minimal CSS update to achieve the goal.
+   - If font changes are needed, update imports with edit_document_fonts. Then update CSS via edit_document_style.
+4) For factual content or examples, search with browser_search. Summarize and cite sources with Markdown links.
+
+Formatting guidelines
+- Headings: #..###### for structure; lists and tables when appropriate.
+- Code: fenced code blocks with language tag. Do not put math in code blocks.
+- Math: Inline $...$ and block $$...$$ using KaTeX-compatible syntax.
+- Images: Use Markdown images; include alt text. Only use HTML when side-by-side or complex layout is required.
+
+Safety and quality
+- Do not include <script> or inline event handlers.
+- Be concise when the user is vague; be thorough when the user is specific.
+`;
+
+const fullAgent = new Agent(components.agent, {
+  name: "full-agent",
+  languageModel: groq.languageModel("openai/gpt-oss-120b"),
+  instructions: DEFAULT_FULL_AGENT_INSTRUCTIONS,
+  tools: {
+    read_document_markdown_content,
+    edit_document_markdown_content,
+    read_document_style,
+    edit_document_style,
+    read_document_fonts,
+    edit_document_fonts,
+    browser_search: groq.tools.browserSearch({}),
+  },
+  callSettings: { maxRetries: 5 },
+  usageHandler: async (ctx, args) => {
+    const {
+      userId,
+      threadId,
+      agentName,
+      model,
+      provider,
+      usage,
+      providerMetadata,
+    } = args;
+
+    // Skip tracking for anonymous users
+    if (!userId) {
+      console.debug("Skipping usage tracking for anonymous user");
+      return;
+    }
+    // Defensive: ensure threadId is present
+    if (!threadId) {
+      console.warn("Skipping usage tracking: missing threadId");
+      return;
+    }
+
+    // Deterministic, string idempotency key when provider gives one; fallback to a thread-scoped key.
+    const idempotencyKey =
+      typeof providerMetadata?.requestId === "string"
+        ? providerMetadata.requestId
+        : `${threadId}:${provider}:${model}:${Date.now()}:${Math.random()}`;
+
+    // 1) Persist raw usage (deduped by idempotencyKey) and capture the inserted rawUsage id.
+    let rawUsageId: any = null;
+    try {
+      rawUsageId = await ctx.runMutation(internal.chat.insertRawUsage, {
+        userId,
+        threadId,
+        agentName,
+        model,
+        provider,
+        usage,
+        providerMetadata,
+        idempotencyKey,
+      });
+    } catch (error) {
+      console.error("Failed to track usage (insertRawUsage):", error);
+    }
+
+    // 2) If token counts are available, schedule a server-side job to finalize billing.
+    try {
+      const u = usage as any;
+      const inputTokens = Number.isFinite(u?.inputTokens)
+        ? Number(u.inputTokens)
+        : undefined;
+      const outputTokens = Number.isFinite(u?.outputTokens)
+        ? Number(u.outputTokens)
+        : undefined;
+
+      // Only schedule finalization when we have token counts and a persisted rawUsage row.
+      if (
+        rawUsageId &&
+        (inputTokens !== undefined || outputTokens !== undefined)
+      ) {
+        try {
+          await ctx.runMutation(internal.chat.processRawUsage, {
+            rawUsageId: rawUsageId as any,
+          });
+        } catch (schedErr) {
+          console.error("Failed to schedule billing finalization:", schedErr);
+        }
+      } else {
+        console.debug(
+          "Skipping scheduling finalization (no tokens or no rawUsageId)",
+          {
+            threadId,
+            provider,
+            model,
+            inputTokens,
+            outputTokens,
+            rawUsageId,
+          }
+        );
+      }
+    } catch (error) {
+      console.error("Failed during billing scheduling step:", error);
+    }
+  },
 });
 
 export const insertRawUsage = internalMutation({
@@ -358,6 +671,233 @@ export const sendWritingPrompt = action({
     }
   },
 });
+
+export const sendFullAgentPrompt = action({
+  args: {
+    threadId: v.string(),
+    prompt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { thread } = await fullAgent.continueThread(ctx, {
+      threadId: args.threadId,
+    });
+
+    const result = await thread.streamText(
+      { prompt: args.prompt },
+      { saveStreamDeltas: { chunking: "word" } }
+    );
+
+    // Diagnostic: announce consumeStream start for this run
+    console.debug("sendFullAgentPrompt: about to consumeStream", {
+      threadId: args.threadId,
+      promptPreview: args.prompt?.slice?.(0, 200) ?? "[no prompt]",
+    });
+
+    try {
+      await result.consumeStream();
+
+      // Post-consume verification: ensure messages were persisted for this thread.
+      try {
+        const { page } = await fullAgent.listMessages(ctx, {
+          threadId: args.threadId,
+          paginationOpts: { cursor: null, numItems: 5 },
+          excludeToolMessages: true,
+        });
+        console.debug("sendFullAgentPrompt: after consumeStream listMessages", {
+          threadId: args.threadId,
+          numMessages: Array.isArray(page) ? page.length : 0,
+          sampleIds: Array.isArray(page)
+            ? page.slice(0, 3).map((m: any) => m._id)
+            : [],
+        });
+      } catch (listErr) {
+        console.error(
+          "sendFullAgentPrompt: listMessages after consumeStream failed",
+          {
+            threadId: args.threadId,
+            error: listErr,
+          }
+        );
+      }
+
+      return;
+    } catch (err) {
+      console.error("sendFullAgentPrompt: consumeStream failed", {
+        threadId: args.threadId,
+        error: err,
+      });
+      throw err;
+    }
+  },
+});
+
+export const listFullAgentThreadMessages = query({
+  args: {
+    threadId: v.string(),
+    paginationOpts: paginationOptsValidator,
+    streamArgs: vStreamArgs,
+  },
+  handler: async (ctx, args) => {
+    try {
+      await authorizeThreadAccess(ctx, args.threadId);
+    } catch (err) {
+      throw err;
+    }
+
+    const paginated = await fullAgent.listMessages(ctx, {
+      threadId: args.threadId,
+      paginationOpts: args.paginationOpts,
+      excludeToolMessages: false,
+    });
+
+    const streams = await fullAgent.syncStreams(ctx, {
+      threadId: args.threadId,
+      streamArgs: args.streamArgs,
+    });
+
+    return {
+      ...paginated,
+      streams,
+    };
+  },
+});
+
+export const streamFullAgent = internalAction({
+  args: { promptMessageId: v.string(), threadId: v.string() },
+  handler: async (ctx, { promptMessageId, threadId }) => {
+    const { thread } = await fullAgent.continueThread(ctx, { threadId });
+
+    const result = await thread.streamText(
+      { promptMessageId },
+      { saveStreamDeltas: true }
+    );
+
+    let lastError;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.debug("streamFullAgent: about to consumeStream", {
+          promptMessageId,
+          threadId,
+          attempt,
+        });
+        await result.consumeStream();
+
+        try {
+          const { page } = await fullAgent.listMessages(ctx, {
+            threadId,
+            paginationOpts: { cursor: null, numItems: 5 },
+            excludeToolMessages: false,
+          });
+          console.debug("streamFullAgent: after consumeStream listMessages", {
+            threadId,
+            promptMessageId,
+            attempt,
+            numMessages: Array.isArray(page) ? page.length : 0,
+            sampleIds: Array.isArray(page)
+              ? page.slice(0, 3).map((m: any) => m._id)
+              : [],
+          });
+        } catch (listErr) {
+          console.error(
+            "streamFullAgent: listMessages after consumeStream failed",
+            {
+              threadId,
+              promptMessageId,
+              attempt,
+              error: listErr,
+            }
+          );
+        }
+        console.debug("streamFullAgent: consumeStream succeeded", {
+          promptMessageId,
+          threadId,
+          attempt,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        console.error(`FullAgent stream attempt ${attempt} failed:`, error, {
+          promptMessageId,
+          threadId,
+        });
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt - 1) * 100;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    console.error("FullAgent stream failed after all retries:", lastError, {
+      promptMessageId,
+      threadId,
+    });
+
+    try {
+      const fallback = await fullAgent.saveMessage(ctx, {
+        threadId,
+        prompt:
+          "Sorry, I encountered an error generating the response. Please try again.",
+        skipEmbeddings: true,
+      });
+      console.debug("streamFullAgent: inserted fallback message", {
+        threadId,
+        fallbackId: (fallback as any)?.messageId ?? fallback,
+      });
+    } catch (fallbackError) {
+      console.error(
+        "FullAgent: Failed to insert fallback message:",
+        fallbackError
+      );
+    }
+  },
+});
+
+export const streamFullAgentAsynchronously = mutation({
+  args: { prompt: v.string(), threadId: v.string() },
+  handler: async (ctx, { prompt, threadId }) => {
+    await authorizeThreadAccess(ctx, threadId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity?.subject;
+
+    if (userId) {
+      const balanceCheck = await ctx.runQuery(
+        api.billing.checkSufficientBalance,
+        {
+          userId,
+          modelId: "openai/gpt-oss-120b",
+          estimatedInputTokens: Math.min(prompt.length / 4, 1000),
+          estimatedOutputTokens: 2500,
+        }
+      );
+
+      if (!balanceCheck.hasSufficientBalance) {
+        throw new Error(
+          `Insufficient balance. You need approximately $${(
+            balanceCheck.estimatedCostMicroCents /
+            (1_000_000 * 100)
+          ).toFixed(4)} but only have $${balanceCheck.balanceInDollars.toFixed(
+            4
+          )}. Please add funds to your account.`
+        );
+      }
+    }
+
+    const { messageId } = await fullAgent.saveMessage(ctx, {
+      threadId,
+      prompt,
+      skipEmbeddings: true,
+    });
+    await ctx.scheduler.runAfter(0, internal.chat.streamFullAgent, {
+      threadId,
+      promptMessageId: messageId,
+    });
+  },
+});
+
+// Backward-compatibility alias with the requested spelling
+export const stramFullAgentAsynchronously = streamFullAgentAsynchronously;
 
 export const streamMarkdown = internalAction({
   args: { promptMessageId: v.string(), threadId: v.string() },
