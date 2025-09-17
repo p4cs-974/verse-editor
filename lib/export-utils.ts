@@ -1293,7 +1293,7 @@ export async function exportToPdf(
 
                 // Convert to image and add to PDF immediately
                 const imgData = pageCanvas.toDataURL("image/png");
-                if (i > 0 || s > 0 || pageIdx > 0) {
+                if (i > 0 || pageIdx > 0) {
                   if (opts.pageFormat === "A4") {
                     pdf.addPage("a4");
                   } else {
