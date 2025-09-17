@@ -752,6 +752,20 @@ function mmToPx(mm: number) {
   return (mm * dpi) / 25.4;
 }
 
+/**
+ * Exports the provided HTML as a multi-page PDF and triggers a download.
+ *
+ * This performs asset inlining and color-function sanitization, optionally paginates the content,
+ * renders each page (using html2canvas / html2canvas-pro and jsPDF), assembles the PDF, and starts a download.
+ * Progress is emitted via the module's exportProgress event hub and the operation supports cancellation
+ * via the module-level abort controller (cancelCurrentExport).
+ *
+ * @param html - A complete HTML document string to export (typically produced by serializePreviewToHTML()).
+ * @param opts.pagination - If true, split content into logical pages before rendering; otherwise render as a single page flow.
+ * @param opts.pageFormat - Target page format: "A4" for standard A4 or "4:3" for a 4:3 width-to-height ratio.
+ * @param opts.fileName - Optional filename for the downloaded PDF. If omitted or invalid a timestamped fallback name is used.
+ * @returns A promise that resolves when the download has been triggered. The promise rejects on failure or if the export is aborted.
+ */
 export async function exportToPdf(
   html: string,
   opts: {
