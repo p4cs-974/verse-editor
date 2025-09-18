@@ -752,6 +752,20 @@ function mmToPx(mm: number) {
   return (mm * dpi) / 25.4;
 }
 
+/**
+ * Exports the provided HTML as a multi-page PDF and triggers a download.
+ *
+ * This performs asset inlining and color-function sanitization, optionally paginates the content,
+ * renders each page (using html2canvas / html2canvas-pro and jsPDF), assembles the PDF, and starts a download.
+ * Progress is emitted via the module's exportProgress event hub and the operation supports cancellation
+ * via the module-level abort controller (cancelCurrentExport).
+ *
+ * @param html - A complete HTML document string to export (typically produced by serializePreviewToHTML()).
+ * @param opts.pagination - If true, split content into logical pages before rendering; otherwise render as a single page flow.
+ * @param opts.pageFormat - Target page format: "A4" for standard A4 or "4:3" for a 4:3 width-to-height ratio.
+ * @param opts.fileName - Optional filename for the downloaded PDF. If omitted or invalid a timestamped fallback name is used.
+ * @returns A promise that resolves when the download has been triggered. The promise rejects on failure or if the export is aborted.
+ */
 export async function exportToPdf(
   html: string,
   opts: {
@@ -996,11 +1010,186 @@ export async function exportToPdf(
           scale,
           useCORS: true,
           backgroundColor: "#ffffff",
+          // Ensure the virtual window matches the full document size
           windowWidth: bodyEl.scrollWidth,
           windowHeight: bodyEl.scrollHeight,
+          // Explicitly render the full element, not just the viewport
+          width: bodyEl.scrollWidth,
+          height: contentHeightCssPx,
+          // Avoid scroll offset affecting capture
+          scrollX: 0,
+          scrollY: 0,
         };
         if ((iframe as any).contentWindow) {
           html2canvasOptions.window = (iframe as any).contentWindow;
+        }
+        // Primary path: robust tiled per-page rendering
+        try {
+          const wrapper = document.createElement("div");
+          wrapper.style.position = "fixed";
+          wrapper.style.left = "-9999px";
+          wrapper.style.top = "-9999px";
+          wrapper.style.width = `${Math.round(mmToPx(pageWidthMm))}px`;
+          wrapper.style.height = `${Math.round(mmToPx(pageHeightMm))}px`;
+          wrapper.style.overflow = "hidden";
+          wrapper.style.backgroundColor = "white";
+
+          const mover = document.createElement("div");
+          mover.style.willChange = "transform";
+          mover.style.transform = "translateY(0px)";
+          mover.style.width = "100%";
+          // Use the sanitized iframe body innerHTML
+          mover.innerHTML = bodyEl.innerHTML;
+          wrapper.appendChild(mover);
+          document.body.appendChild(wrapper);
+
+          try {
+            // Allow layout to settle
+            await new Promise((r) => setTimeout(r, 100));
+            // Ensure images inside the mover are loaded before measuring/painting
+            const imgs = Array.from(
+              mover.querySelectorAll("img")
+            ) as HTMLImageElement[];
+            if (imgs.length) {
+              await new Promise<void>((resolve) => {
+                let remaining = imgs.length;
+                const done = () => {
+                  remaining--;
+                  if (remaining <= 0) resolve();
+                };
+                imgs.forEach((im) => {
+                  if (im.complete && im.naturalWidth !== 0) {
+                    done();
+                  } else {
+                    const onload = () => {
+                      cleanup();
+                      done();
+                    };
+                    const onerror = () => {
+                      cleanup();
+                      done();
+                    };
+                    const cleanup = () => {
+                      im.removeEventListener("load", onload);
+                      im.removeEventListener("error", onerror);
+                    };
+                    im.addEventListener("load", onload);
+                    im.addEventListener("error", onerror);
+                  }
+                });
+                // safety timeout
+                setTimeout(() => resolve(), 4000);
+              });
+            }
+            const pageCssPx = Math.round(mmToPx(pageHeightMm));
+            // Compute scale based on wrapper width for crisp output
+            const tiledScale = Math.max(
+              1,
+              targetPxWidth / (wrapper.scrollWidth || targetCssPxWidth)
+            );
+
+            // Pre-measure image rects relative to mover at transform=0
+            const moverRect = mover.getBoundingClientRect();
+            const imgRects = Array.from(mover.querySelectorAll("img"))
+              .map((im) => {
+                const r = im.getBoundingClientRect();
+                const top = r.top - moverRect.top;
+                const bottom = r.bottom - moverRect.top;
+                return { top, bottom, height: bottom - top };
+              })
+              .sort((a, b) => a.top - b.top);
+
+            let currentY = 0;
+            let pageIdx = 0;
+            while (currentY < contentHeightCssPx - 0.5) {
+              if (signal.aborted) throw new Error("Export aborted");
+              const tentativeEnd = Math.min(
+                currentY + pageCssPx,
+                contentHeightCssPx
+              );
+              // Find an image that would be split by the tentative end
+              const crossing = imgRects.find(
+                (r) =>
+                  r.top < tentativeEnd &&
+                  r.bottom > tentativeEnd &&
+                  r.height <= pageCssPx
+              );
+
+              let translateStart: number;
+              if (crossing) {
+                // If the image begins near the page start, keep it whole on this page by aligning its bottom to page bottom
+                if (crossing.top <= currentY + 4) {
+                  translateStart = Math.max(
+                    0,
+                    Math.floor(crossing.bottom - pageCssPx)
+                  );
+                  // Ensure we still progress at least a few pixels when image is smaller than page
+                  if (
+                    translateStart < currentY &&
+                    crossing.height <= pageCssPx
+                  ) {
+                    translateStart = currentY;
+                  }
+                  currentY = translateStart + pageCssPx;
+                } else {
+                  // End the current page before the image starts; capture [end - pageHeight, end)
+                  const endY = Math.max(currentY, Math.floor(crossing.top));
+                  translateStart = Math.max(0, endY - pageCssPx);
+                  currentY = endY;
+                }
+              } else {
+                // No crossing; natural paging
+                translateStart = Math.floor(currentY);
+                currentY = tentativeEnd;
+              }
+
+              mover.style.transform = `translateY(-${translateStart}px)`;
+              await new Promise((r) => setTimeout(r, 20));
+
+              const pageCanvas = await html2canvasLib(wrapper, {
+                scale: tiledScale,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                width: wrapper.clientWidth || wrapper.scrollWidth,
+                height: pageCssPx,
+                scrollX: 0,
+                scrollY: 0,
+              });
+
+              const imgData = pageCanvas.toDataURL("image/jpeg", 0.95);
+              if (i > 0 || pageIdx > 0) {
+                if (opts.pageFormat === "A4") {
+                  pdf.addPage("a4");
+                } else {
+                  pdf.addPage([
+                    Math.round(pageWidthMm * 10) / 10,
+                    Math.round(pageHeightMm * 10) / 10,
+                  ]);
+                }
+              }
+              pdf.addImage(
+                imgData,
+                "JPEG",
+                0,
+                0,
+                pageWidthMm,
+                pageHeightMm,
+                undefined,
+                "FAST"
+              );
+
+              pageIdx++;
+            }
+
+            // Done with this logical page; go to next without using the legacy tall-canvas path
+            continue;
+          } finally {
+            try {
+              wrapper.remove();
+            } catch {}
+          }
+        } catch (primaryTileErr) {
+          // If tiled rendering fails unexpectedly, fall back to legacy path below
         }
         const renderTimeoutMs = 15000;
         let canvas: HTMLCanvasElement;
@@ -1040,48 +1229,109 @@ export async function exportToPdf(
               ),
             ]);
           } catch (e2) {
-            // Final fallback: clone content to a hidden same-origin div and render that
+            // Final robust fallback: tile-render pages by translating content
             emitProgress({
               stage: "render-fallback",
-              message: "Falling back to same-origin DOM render",
+              message: "Tiled render per page (robust fallback)",
             });
+
+            // Build a same-origin wrapper and a mover inside to translate content
             const wrapper = document.createElement("div");
             wrapper.style.position = "fixed";
             wrapper.style.left = "-9999px";
             wrapper.style.top = "-9999px";
             wrapper.style.width = `${Math.round(mmToPx(pageWidthMm))}px`;
             wrapper.style.height = `${Math.round(mmToPx(pageHeightMm))}px`;
-            wrapper.style.overflow = "auto";
+            wrapper.style.overflow = "hidden";
             wrapper.style.backgroundColor = "white";
-            // Clone the iframe body content into the wrapper
-            wrapper.innerHTML = bodyEl.innerHTML;
+
+            const mover = document.createElement("div");
+            mover.style.willChange = "transform";
+            mover.style.transform = "translateY(0px)";
+            mover.style.width = "100%";
+            mover.innerHTML = bodyEl.innerHTML;
+            wrapper.appendChild(mover);
             document.body.appendChild(wrapper);
 
             try {
-              // Allow fonts/images a short moment to settle in the parent doc
+              // Allow a moment for layout and fonts in parent doc
               await new Promise((r) => setTimeout(r, 200));
 
-              // Try rendering the wrapper (same-origin avoids iframe window issues)
+              const totalHeight = Math.max(
+                mover.scrollHeight,
+                mover.clientHeight,
+                Math.round(mmToPx(pageHeightMm))
+              );
+              const pageCssPx = Math.round(mmToPx(pageHeightMm));
+              const pagesNeeded = Math.max(
+                1,
+                Math.ceil(totalHeight / pageCssPx)
+              );
+
               const fallbackScale = Math.max(
                 1,
-                targetPxWidth / (wrapper.scrollWidth || targetPxWidth)
+                targetPxWidth / (wrapper.scrollWidth || targetCssPxWidth)
               );
-              const fallbackTimeoutMs = 10000;
-              canvas = await Promise.race([
-                html2canvasLib(wrapper, {
-                  scale: fallbackScale,
-                  useCORS: true,
-                  backgroundColor: "#ffffff",
-                }),
-                new Promise<HTMLCanvasElement>((_, reject) =>
-                  setTimeout(
-                    () => reject(new Error("html2canvas render timeout")),
-                    fallbackTimeoutMs
-                  )
-                ),
-              ]);
+              const fallbackTimeoutMs = 12000;
+
+              // Create a blank canvas to satisfy later usage; actual per-page canvases will be created in the loop
+              // We still set `canvas` to a dummy 1x1 to avoid referencing before assignment later
+              canvas = document.createElement("canvas");
+              canvas.width = 1;
+              canvas.height = 1;
+
+              for (let pageIdx = 0; pageIdx < pagesNeeded; pageIdx++) {
+                if (signal.aborted) throw new Error("Export aborted");
+                const offsetY = pageIdx * pageCssPx;
+                mover.style.transform = `translateY(-${offsetY}px)`;
+                // Allow transform to apply
+                await new Promise((r) => setTimeout(r, 30));
+
+                const pageCanvas = await Promise.race([
+                  html2canvasLib(wrapper, {
+                    scale: fallbackScale,
+                    useCORS: true,
+                    backgroundColor: "#ffffff",
+                    width: wrapper.scrollWidth,
+                    height: pageCssPx,
+                    scrollX: 0,
+                    scrollY: 0,
+                  }),
+                  new Promise<HTMLCanvasElement>((_, reject) =>
+                    setTimeout(
+                      () => reject(new Error("html2canvas render timeout")),
+                      fallbackTimeoutMs
+                    )
+                  ),
+                ]);
+
+                // Convert to image and add to PDF immediately
+                const imgData = pageCanvas.toDataURL("image/png");
+                if (i > 0 || pageIdx > 0) {
+                  if (opts.pageFormat === "A4") {
+                    pdf.addPage("a4");
+                  } else {
+                    pdf.addPage([
+                      Math.round(pageWidthMm * 10) / 10,
+                      Math.round(pageHeightMm * 10) / 10,
+                    ]);
+                  }
+                }
+                pdf.addImage(
+                  imgData,
+                  "PNG",
+                  0,
+                  0,
+                  pageWidthMm,
+                  pageHeightMm,
+                  undefined,
+                  "FAST"
+                );
+              }
+
+              // Skip the standard slicing path since we've already added pages
+              continue;
             } finally {
-              // Always cleanup the wrapper
               try {
                 wrapper.remove();
               } catch {}
@@ -1135,7 +1385,14 @@ export async function exportToPdf(
           const imgData = pageCanvas.toDataURL("image/png");
 
           if (i > 0 || s > 0) {
-            pdf.addPage();
+            if (opts.pageFormat === "A4") {
+              pdf.addPage("a4");
+            } else {
+              pdf.addPage([
+                Math.round(pageWidthMm * 10) / 10,
+                Math.round(pageHeightMm * 10) / 10,
+              ]);
+            }
           }
           // Add image filling the page
           pdf.addImage(
